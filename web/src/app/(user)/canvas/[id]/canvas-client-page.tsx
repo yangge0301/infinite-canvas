@@ -2720,8 +2720,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         !sourceNode?.metadata?.isBatchRoot &&
                         !sourceNode?.metadata?.batchRootId &&
                         !isKIESeedreamLayerDecompositionModel(generationConfig.model);
+                    const reuseImageAsReference = keepsImageCandidates && Boolean(sourceNode?.metadata?.reuseImageAsReference);
                     const sourceReference =
-                        isImageNode && sourceNode?.metadata?.content
+                        reuseImageAsReference && sourceNode?.metadata?.content
                             ? [{ id: sourceNode.id, name: `image-${sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
                             : [];
                     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
@@ -2766,7 +2767,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         const taskResults = await Promise.all(
                             targetIds.map(async (targetId) => {
                                 try {
-                                    const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, sourceReference, { nodeId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                    const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, { nodeId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
                                     setNodes((prev) => updateImageCandidateTask(prev, nodeId, candidateBatchId, targetId, task, generationStartedAt, imageSize));
                                     return true;
                                 } catch (error) {
