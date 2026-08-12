@@ -3842,6 +3842,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
                                         videoFrameOptions={videoFrameOptionsByNodeId.get(panelNode.id) || []}
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(panelNode.id) || []}
+                                        canvasScale={viewport.k}
+                                        positionVersion={`${viewport.x}:${viewport.y}:${viewport.k}`}
                                         onPromptChange={handleNodePromptChange}
                                         onConfigChange={handleConfigNodeChange}
                                         onGenerate={handleGenerateNode}

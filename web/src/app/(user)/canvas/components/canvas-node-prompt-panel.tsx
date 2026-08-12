@@ -32,11 +32,13 @@ type CanvasNodePromptPanelProps = {
     mentionReferences?: CanvasResourceReference[];
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
+    canvasScale?: number;
+    positionVersion?: string;
     onImageSettingsOpenChange?: (open: boolean) => void;
     onPromptFocus?: () => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -107,6 +109,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
                                 showSize={!isPanorama}
+                                variant="node"
+                                canvasScale={canvasScale}
+                                positionVersion={positionVersion}
                                 reuseImageAsReference={node.type === CanvasNodeType.Image && hasImageContent ? Boolean(node.metadata?.reuseImageAsReference) : undefined}
                                 onReuseImageAsReferenceChange={node.type === CanvasNodeType.Image && hasImageContent ? (reuseImageAsReference) => onConfigChange(node.id, { reuseImageAsReference }) : undefined}
                             />

@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import { CanvasNodeImageSettingsPanel, canvasNodeImageSettingsLabel } from "./canvas-node-image-settings-panel";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
@@ -23,11 +24,14 @@ type CanvasImageSettingsPopoverProps = {
     showSize?: boolean;
     showCount?: boolean;
     buttonIcon?: ReactNode;
+    variant?: "default" | "node";
+    canvasScale?: number;
+    positionVersion?: string;
     reuseImageAsReference?: boolean;
     onReuseImageAsReferenceChange?: (value: boolean) => void;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", showSize = true, showCount = true, buttonIcon, reuseImageAsReference, onReuseImageAsReferenceChange }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", showSize = true, showCount = true, buttonIcon, variant = "default", canvasScale = 1, positionVersion, reuseImageAsReference, onReuseImageAsReferenceChange }: CanvasImageSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -65,9 +69,9 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
             window.removeEventListener("scroll", syncPosition, true);
             window.removeEventListener("pointerdown", closeOnOutsidePointer, true);
         };
-    }, [onOpenChange, open]);
+    }, [canvasScale, onOpenChange, open, positionVersion]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} showSize={effectiveShowSize} showCount={effectiveShowCount} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} showSize={effectiveShowSize} showCount={effectiveShowCount} variant={variant} canvasScale={canvasScale} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} /> : null;
 
     return (
         <>
@@ -76,7 +80,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
                     <span className="truncate">
                         {effectiveShowSize ? (
                             <>
-                                {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)}
+                                {imageQualityLabel(quality)} · {variant === "node" ? canvasNodeImageSettingsLabel(activeSize) : imageSizeLabel(activeSize)}
                                 {effectiveShowCount ? <> · {count} 张</> : null}
                             </>
                         ) : (
@@ -102,6 +106,8 @@ function ImageSettingsPortal({
     onConfigChange,
     showSize,
     showCount,
+    variant,
+    canvasScale,
     reuseImageAsReference,
     onReuseImageAsReferenceChange,
 }: {
@@ -113,28 +119,36 @@ function ImageSettingsPortal({
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     showSize: boolean;
     showCount: boolean;
+    variant: NonNullable<CanvasImageSettingsPopoverProps["variant"]>;
+    canvasScale: number;
     reuseImageAsReference?: boolean;
     onReuseImageAsReferenceChange?: (value: boolean) => void;
 }) {
-    const width = 356;
+    const width = variant === "node" ? 640 : 356;
     const gap = 8;
     const margin = 12;
+    const scale = Math.max(0.35, Math.min(1.5, canvasScale));
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
-    const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - width / 2 : alignRight ? buttonRect.right - width : buttonRect.left;
+    const visualWidth = width * scale;
+    const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - visualWidth / 2 : alignRight ? buttonRect.right - visualWidth : buttonRect.left;
     const topPlacement = placement?.startsWith("top");
+    const availableHeight = topPlacement ? buttonRect.top - margin * 2 : window.innerHeight - buttonRect.bottom - margin * 2;
     const style = {
         position: "fixed",
         zIndex: 1200,
         width,
-        left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
-        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
+        left: Math.max(margin, Math.min(window.innerWidth - visualWidth - margin, left)),
+        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap * scale } : { top: buttonRect.bottom + gap * scale }),
+        maxHeight: Math.max(260, availableHeight / scale),
         background: theme.toolbar.panel,
         borderRadius: 18,
         boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",
         padding: 18,
         overflowY: "auto",
         color: theme.node.text,
+        transform: `scale(${scale})`,
+        transformOrigin: topPlacement ? "bottom left" : "top left",
     } as const;
 
     return createPortal(
@@ -146,25 +160,29 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel
-                config={config}
-                onConfigChange={(key, value) => onConfigChange(key, value)}
-                theme={theme}
-                className="space-y-4"
-                showSize={showSize}
-                showCount={showCount}
-                titleAccessory={onReuseImageAsReferenceChange ? (
-                    <Tooltip title="开启后，重复生成会把当前图片作为参考；关闭时仅使用提示词和已连接的素材">
-                        <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ background: theme.node.fill }}>
-                            <div>
-                                <div className="text-sm font-medium">保持当前图一致</div>
-                                <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>重复生成时将当前图片作为参考</div>
+            {variant === "node" ? (
+                <CanvasNodeImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} showSize={showSize} showCount={showCount} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} />
+            ) : (
+                <ImageSettingsPanel
+                    config={config}
+                    onConfigChange={(key, value) => onConfigChange(key, value)}
+                    theme={theme}
+                    className="space-y-4"
+                    showSize={showSize}
+                    showCount={showCount}
+                    titleAccessory={onReuseImageAsReferenceChange ? (
+                        <Tooltip title="开启后，重复生成会把当前图片作为参考；关闭时仅使用提示词和已连接的素材">
+                            <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ background: theme.node.fill }}>
+                                <div>
+                                    <div className="text-sm font-medium">保持当前图一致</div>
+                                    <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>重复生成时将当前图片作为参考</div>
+                                </div>
+                                <Switch size="small" checked={Boolean(reuseImageAsReference)} aria-label="保持当前图一致" onChange={onReuseImageAsReferenceChange} />
                             </div>
-                            <Switch size="small" checked={Boolean(reuseImageAsReference)} aria-label="保持当前图一致" onChange={onReuseImageAsReferenceChange} />
-                        </div>
-                    </Tooltip>
-                ) : null}
-            />
+                        </Tooltip>
+                    ) : null}
+                />
+            )}
         </div>,
         document.body,
     );
