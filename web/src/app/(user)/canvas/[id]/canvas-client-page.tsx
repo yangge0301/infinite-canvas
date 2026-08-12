@@ -558,7 +558,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     useEffect(() => {
         if (!projectLoaded) return;
         const pollCanvasTasks = () => {
-            const videoTargets = nodesRef.current.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && canvasVideoTaskId(node.metadata));
+            const videoTargets = nodesRef.current.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && !node.metadata.videoCandidateBatches?.length && canvasVideoTaskId(node.metadata));
             videoTargets.forEach((node) => {
                 if (pollingVideoNodeIdsRef.current.has(node.id)) return;
                 const taskId = canvasVideoTaskId(node.metadata);
@@ -2613,7 +2613,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 mode === "video" || (mode === "image" && !isPanoramaNodeType(sourceNode?.type))
                     ? applyCameraPrompt(effectivePrompt, sourceNode?.metadata?.cameraControl)
                     : effectivePrompt;
-            const markSourceStatus = !isCanvasImageNodeType(sourceNode?.type) && !editingTextNode;
+            const markSourceStatus = !isCanvasImageNodeType(sourceNode?.type) && sourceNode?.type !== CanvasNodeType.Video && !editingTextNode;
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 setRunningNodeId(null);
@@ -2988,7 +2988,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         const batchId = `video-batch-${nanoid()}`;
                         const candidateId = `video-candidate-${nanoid()}`;
                         const clientTaskId = `client_video_task_${candidateId}`;
-                        const candidate: CanvasVideoCandidate = { id: candidateId, status: NODE_STATUS_LOADING, progress: 0, videoTaskId: clientTaskId, startedAt: generationStartedAt };
+                        const candidate: CanvasVideoCandidate = { id: candidateId, status: NODE_STATUS_LOADING, progress: 0, startedAt: generationStartedAt };
                         const batch: CanvasVideoCandidateBatch = { id: batchId, prompt: effectivePrompt, createdAt: generationStartedAt, items: [candidate] };
                         const hasCurrentVideo = Boolean(sourceNode.metadata?.content);
                         pendingChildIds = hasCurrentVideo ? [] : [nodeId];
@@ -3023,7 +3023,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                             klingElementList: sourceNode.metadata?.klingElementList,
                                             startedAt: hasCurrentVideo ? node.metadata?.startedAt : generationStartedAt,
                                             progress: hasCurrentVideo ? node.metadata?.progress : 0,
-                                            videoTaskId: hasCurrentVideo ? node.metadata?.videoTaskId : clientTaskId,
+                                            videoTaskId: hasCurrentVideo ? node.metadata?.videoTaskId : undefined,
                                             videoCandidateBatches: [...videoCandidateBatchesForNode(node), batch],
                                         },
                                     }
@@ -3599,7 +3599,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const retryVideoTaskId = node.type === CanvasNodeType.Video ? `client_video_task_${node.id}` : "";
             const retryImageTaskId = isCanvasImageNodeType(node.type) ? `client_image_task_${node.id}` : "";
             const retryAudioTaskId = node.type === CanvasNodeType.Audio ? `client_audio_task_${node.id}` : "";
-            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, content: undefined, storageKey: "", progress: 0, startedAt: retryStartedAt, ...(item.type === CanvasNodeType.Video ? { videoTaskId: retryVideoTaskId, videoTaskVideoId: undefined } : {}), ...(isCanvasImageNodeType(item.type) ? { imageTaskId: retryImageTaskId, imageTaskResultId: undefined } : {}), ...(item.type === CanvasNodeType.Audio ? { audioTaskId: retryAudioTaskId, audioTaskResultId: undefined } : {}) } } : item)));
+            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, content: undefined, storageKey: "", progress: 0, startedAt: retryStartedAt, ...(item.type === CanvasNodeType.Video ? { videoTaskId: retryVideoTaskId, videoTaskVideoId: undefined, videoCandidateBatches: undefined } : {}), ...(isCanvasImageNodeType(item.type) ? { imageTaskId: retryImageTaskId, imageTaskResultId: undefined } : {}), ...(item.type === CanvasNodeType.Audio ? { audioTaskId: retryAudioTaskId, audioTaskResultId: undefined } : {}) } } : item)));
 
             try {
                 if (node.type === CanvasNodeType.Text) {
