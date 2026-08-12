@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowUp, LoaderCircle } from "lucide-react";
-import { Button, Switch, Tooltip } from "antd";
+import { Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -102,6 +102,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
                                 showSize={!isPanorama}
+                                reuseImageAsReference={node.type === CanvasNodeType.Image && hasImageContent ? Boolean(node.metadata?.reuseImageAsReference) : undefined}
+                                onReuseImageAsReferenceChange={node.type === CanvasNodeType.Image && hasImageContent ? (reuseImageAsReference) => onConfigChange(node.id, { reuseImageAsReference }) : undefined}
                             />
                         </>
                     ) : mode === "video" ? (
@@ -119,14 +121,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     )}
                     {mode === "video" || (mode === "image" && !isPanorama) ? (
                         <CanvasCameraControl value={node.metadata?.cameraControl} onChange={(cameraControl) => onConfigChange(node.id, { cameraControl })} buttonClassName="!h-10 !min-w-[92px] !justify-start !rounded-full !px-3" />
-                    ) : null}
-                    {mode === "image" && node.type === CanvasNodeType.Image && hasImageContent ? (
-                        <Tooltip title="开启后，重复生成会把当前图片作为参考；关闭时仅使用提示词和已连接的素材">
-                            <span className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-3 text-xs" style={{ background: theme.node.fill }}>
-                                <span style={{ color: node.metadata?.reuseImageAsReference ? theme.node.text : theme.node.muted }}>保持当前图一致</span>
-                                <Switch size="small" checked={Boolean(node.metadata?.reuseImageAsReference)} aria-label="保持当前图一致" onChange={(reuseImageAsReference) => onConfigChange(node.id, { reuseImageAsReference })} />
-                            </span>
-                        </Tooltip>
                     ) : null}
                 </div>
                 <Button

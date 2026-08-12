@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Settings2 } from "lucide-react";
-import { Button } from "antd";
+import { Button, Switch, Tooltip } from "antd";
 
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -23,9 +23,11 @@ type CanvasImageSettingsPopoverProps = {
     showSize?: boolean;
     showCount?: boolean;
     buttonIcon?: ReactNode;
+    reuseImageAsReference?: boolean;
+    onReuseImageAsReferenceChange?: (value: boolean) => void;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", showSize = true, showCount = true, buttonIcon }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", showSize = true, showCount = true, buttonIcon, reuseImageAsReference, onReuseImageAsReferenceChange }: CanvasImageSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -65,7 +67,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [onOpenChange, open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} showSize={effectiveShowSize} showCount={effectiveShowCount} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} showSize={effectiveShowSize} showCount={effectiveShowCount} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} /> : null;
 
     return (
         <>
@@ -100,6 +102,8 @@ function ImageSettingsPortal({
     onConfigChange,
     showSize,
     showCount,
+    reuseImageAsReference,
+    onReuseImageAsReferenceChange,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
@@ -109,6 +113,8 @@ function ImageSettingsPortal({
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     showSize: boolean;
     showCount: boolean;
+    reuseImageAsReference?: boolean;
+    onReuseImageAsReferenceChange?: (value: boolean) => void;
 }) {
     const width = 356;
     const gap = 8;
@@ -140,7 +146,25 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" showSize={showSize} showCount={showCount} />
+            <ImageSettingsPanel
+                config={config}
+                onConfigChange={(key, value) => onConfigChange(key, value)}
+                theme={theme}
+                className="space-y-4"
+                showSize={showSize}
+                showCount={showCount}
+                titleAccessory={onReuseImageAsReferenceChange ? (
+                    <Tooltip title="开启后，重复生成会把当前图片作为参考；关闭时仅使用提示词和已连接的素材">
+                        <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ background: theme.node.fill }}>
+                            <div>
+                                <div className="text-sm font-medium">保持当前图一致</div>
+                                <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>重复生成时将当前图片作为参考</div>
+                            </div>
+                            <Switch size="small" checked={Boolean(reuseImageAsReference)} aria-label="保持当前图一致" onChange={onReuseImageAsReferenceChange} />
+                        </div>
+                    </Tooltip>
+                ) : null}
+            />
         </div>,
         document.body,
     );
