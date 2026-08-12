@@ -49,6 +49,7 @@ import { InfiniteCanvas } from "../components/infinite-canvas";
 import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasImageCandidatePicker } from "../components/canvas-image-candidate-picker";
+import { CanvasVideoCandidatePicker } from "../components/canvas-video-candidate-picker";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasVideoFrameOption } from "../components/canvas-node-prompt-panel";
 import type { CanvasVideoResourceOption } from "../components/canvas-video-settings-popover";
 import { CanvasToolbar } from "../components/canvas-toolbar";
@@ -72,6 +73,8 @@ import {
     type CanvasImageGenerationType,
     type CanvasImageCandidate,
     type CanvasImageCandidateBatch,
+    type CanvasVideoCandidate,
+    type CanvasVideoCandidateBatch,
     type CanvasNodeData,
     type CanvasNodeMetadata,
     type CanvasPendingAgentRequest,
@@ -385,6 +388,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [candidatePickerNodeId, setCandidatePickerNodeId] = useState<string | null>(null);
+    const [videoCandidatePickerNodeId, setVideoCandidatePickerNodeId] = useState<string | null>(null);
     const [agentPanel, setAgentPanel] = useState(DEFAULT_CANVAS_AGENT_PANEL);
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [titleEditing, setTitleEditing] = useState(false);
@@ -425,7 +429,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const hasLoadingTimedNodes = nodes.some(
         (node) =>
             (node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && (node.type === CanvasNodeType.Video || isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Audio)) ||
-            Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === NODE_STATUS_LOADING))),
+            Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === NODE_STATUS_LOADING))) ||
+            Boolean(node.metadata?.videoCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === NODE_STATUS_LOADING))),
     );
 
     const createHistoryEntry = useCallback(
@@ -567,6 +572,31 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     .catch(() => undefined)
                     .finally(() => {
                         pollingVideoNodeIdsRef.current.delete(node.id);
+                    });
+            });
+            const candidateVideoTargets = nodesRef.current.flatMap((node) =>
+                node.type === CanvasNodeType.Video
+                    ? (node.metadata?.videoCandidateBatches || []).flatMap((batch) =>
+                        batch.items
+                            .filter((candidate) => candidate.status === NODE_STATUS_LOADING && !candidate.content && canvasVideoCandidateTaskId(candidate))
+                            .map((candidate) => ({ node, batchId: batch.id, candidate })),
+                    )
+                    : [],
+            );
+            candidateVideoTargets.forEach(({ node, batchId, candidate }) => {
+                const pollingId = `${node.id}:${batchId}:${candidate.id}`;
+                if (pollingVideoNodeIdsRef.current.has(pollingId) || !canvasVideoCandidateTaskId(candidate)) return;
+                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
+                if (!isAiConfigReady(generationConfig, generationConfig.model)) return;
+                pollingVideoNodeIdsRef.current.add(pollingId);
+                void pollVideoGenerationTaskStatus(generationConfig, canvasVideoTaskFromCandidate(candidate))
+                    .then((task) => {
+                        setNodes((prev) => updateVideoCandidateTask(prev, node.id, batchId, candidate.id, task, generationConfig, candidate.startedAt || Date.now(), { width: node.width, height: node.height }));
+                        if (canvasVideoTaskFailed(task)) message.error(canvasVideoTaskError(task));
+                    })
+                    .catch(() => undefined)
+                    .finally(() => {
+                        pollingVideoNodeIdsRef.current.delete(pollingId);
                     });
             });
             const imageTargets = nodesRef.current.filter((node) => isCanvasImageNodeType(node.type) && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && node.metadata.imageTaskId);
@@ -837,6 +867,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const candidatePickerNode = candidatePickerNodeId ? nodeById.get(candidatePickerNodeId) || null : null;
+    const videoCandidatePickerNode = videoCandidatePickerNodeId ? nodeById.get(videoCandidatePickerNodeId) || null : null;
     const openDirectorNode = openDirectorNodeId ? nodeById.get(openDirectorNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
@@ -1072,6 +1103,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setDialogNodeId(null);
         setEditingNodeId(null);
         setCandidatePickerNodeId(null);
+        setVideoCandidatePickerNodeId(null);
     }, [cancelPendingConnectionCreate]);
 
     const clearCanvas = useCallback(() => {
@@ -1879,6 +1911,31 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             ),
         );
         setCandidatePickerNodeId(null);
+    }, []);
+
+    const selectVideoCandidate = useCallback((nodeId: string, candidate: CanvasVideoCandidate) => {
+        if (!candidate.content) return;
+        setNodes((prev) =>
+            prev.map((node) =>
+                node.id === nodeId
+                    ? {
+                        ...node,
+                        metadata: {
+                            ...node.metadata,
+                            content: candidate.content,
+                            storageKey: candidate.storageKey || "",
+                            naturalWidth: candidate.naturalWidth || node.metadata?.naturalWidth,
+                            naturalHeight: candidate.naturalHeight || node.metadata?.naturalHeight,
+                            bytes: candidate.bytes || 0,
+                            mimeType: candidate.mimeType || node.metadata?.mimeType || "video/mp4",
+                            status: NODE_STATUS_SUCCESS,
+                            errorDetails: undefined,
+                        },
+                    }
+                    : node,
+            ),
+        );
+        setVideoCandidatePickerNodeId(null);
     }, []);
 
     const openTextEditor = useCallback((node: CanvasNodeData) => {
@@ -2926,6 +2983,64 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const lastFrame = frameReferencesEnabled ? generationContext.lastFrame : null;
                     const videoReferenceImages = frameReferencesEnabled ? generationContext.referenceImages : [...generationContext.referenceImages, ...[generationContext.firstFrame, generationContext.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
                     const spec = nodeSizeFromRatio(videoGenerationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+                    const isExistingVideoNode = sourceNode?.type === CanvasNodeType.Video;
+                    if (isExistingVideoNode && sourceNode) {
+                        const batchId = `video-batch-${nanoid()}`;
+                        const candidateId = `video-candidate-${nanoid()}`;
+                        const clientTaskId = `client_video_task_${candidateId}`;
+                        const candidate: CanvasVideoCandidate = { id: candidateId, status: NODE_STATUS_LOADING, progress: 0, videoTaskId: clientTaskId, startedAt: generationStartedAt };
+                        const batch: CanvasVideoCandidateBatch = { id: batchId, prompt: effectivePrompt, createdAt: generationStartedAt, items: [candidate] };
+                        const hasCurrentVideo = Boolean(sourceNode.metadata?.content);
+                        pendingChildIds = hasCurrentVideo ? [] : [nodeId];
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === nodeId
+                                    ? {
+                                        ...node,
+                                        title: hasCurrentVideo ? node.title : effectivePrompt.slice(0, 32) || node.title || "Generated Video",
+                                        metadata: {
+                                            ...node.metadata,
+                                            prompt: effectivePrompt,
+                                            status: hasCurrentVideo ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
+                                            errorDetails: undefined,
+                                            model: videoGenerationConfig.model,
+                                            channelId: videoGenerationConfig.videoChannelId || videoGenerationConfig.activeChannelId,
+                                            size: videoGenerationConfig.size,
+                                            seconds: videoGenerationConfig.videoSeconds,
+                                            vquality: videoGenerationConfig.vquality,
+                                            mode: videoGenerationConfig.videoMode,
+                                            negativePrompt: videoGenerationConfig.videoNegativePrompt,
+                                            multiShot: videoGenerationConfig.videoMultiShot,
+                                            shotType: videoGenerationConfig.videoShotType,
+                                            generateAudio: videoGenerationConfig.videoGenerateAudio,
+                                            characterOrientation: videoGenerationConfig.videoCharacterOrientation,
+                                            watermark: videoGenerationConfig.videoWatermark,
+                                            references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages, firstFrame, lastFrame }),
+                                            firstFrameNodeId: sourceNode.metadata?.firstFrameNodeId,
+                                            lastFrameNodeId: sourceNode.metadata?.lastFrameNodeId,
+                                            klingImageNodeIds: sourceNode.metadata?.klingImageNodeIds,
+                                            klingMultiPrompt: sourceNode.metadata?.klingMultiPrompt,
+                                            klingElementList: sourceNode.metadata?.klingElementList,
+                                            startedAt: hasCurrentVideo ? node.metadata?.startedAt : generationStartedAt,
+                                            progress: hasCurrentVideo ? node.metadata?.progress : 0,
+                                            videoTaskId: hasCurrentVideo ? node.metadata?.videoTaskId : clientTaskId,
+                                            videoCandidateBatches: [...videoCandidateBatchesForNode(node), batch],
+                                        },
+                                    }
+                                    : node,
+                            ),
+                        );
+                        try {
+                            const created = await createVideoGenerationTask(videoGenerationConfig, requestPrompt, { references: videoReferenceImages, firstFrame, lastFrame, videoReferences: generationContext.referenceVideos, audioReferences: generationContext.referenceAudios }, undefined, { clientTaskId, source: "canvas", sourceId: nodeId });
+                            setNodes((prev) => updateVideoCandidateTask(prev, nodeId, batchId, candidateId, created.task, videoGenerationConfig, generationStartedAt, spec));
+                            if (canvasVideoTaskFailed(created.task)) message.error(canvasVideoTaskError(created.task));
+                        } catch (error) {
+                            const errorDetails = error instanceof Error ? error.message : "视频生成失败";
+                            setNodes((prev) => updateVideoCandidateError(prev, nodeId, batchId, candidateId, errorDetails));
+                            message.error(errorDetails);
+                        }
+                        return;
+                    }
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const clientTaskId = `client_video_task_${videoId}`;
@@ -3851,7 +3966,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                             setNodeImageSettingsOpen(open);
                                             if (open) setToolbarNodeId(null);
                                         }}
-                                        onPromptFocus={() => setCandidatePickerNodeId(null)}
+                                        onPromptFocus={() => {
+                                            setCandidatePickerNodeId(null);
+                                            setVideoCandidatePickerNodeId(null);
+                                        }}
                                     />
                                 )
                             }
@@ -3889,6 +4007,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
                             onOpenCandidatePicker={(node) => setCandidatePickerNodeId(node.id)}
+                            onOpenVideoCandidatePicker={(node) => setVideoCandidatePickerNodeId(node.id)}
                             onRetry={(node) => void handleRetryNode(node)}
                             onGenerateImage={generateImageFromTextNode}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
@@ -3920,6 +4039,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             batches={candidatePickerNode.metadata.imageCandidateBatches}
                             onSelect={(candidate) => selectImageCandidate(candidatePickerNode.id, candidate)}
                             onClose={() => setCandidatePickerNodeId(null)}
+                        />
+                    ) : null}
+                    {videoCandidatePickerNode?.type === CanvasNodeType.Video && videoCandidatePickerNode.metadata?.videoCandidateBatches?.length ? (
+                        <CanvasVideoCandidatePicker
+                            node={videoCandidatePickerNode}
+                            batches={videoCandidatePickerNode.metadata.videoCandidateBatches}
+                            onSelect={(candidate) => selectVideoCandidate(videoCandidatePickerNode.id, candidate)}
+                            onClose={() => setVideoCandidatePickerNodeId(null)}
                         />
                     ) : null}
                     {nodeCreatePosition ? (
@@ -4746,6 +4873,150 @@ function applyCanvasVideoTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
     });
 }
 
+function videoCandidateBatchesForNode(node: CanvasNodeData): CanvasVideoCandidateBatch[] {
+    const existingBatches = node.metadata?.videoCandidateBatches;
+    if (existingBatches?.length) return existingBatches;
+    const metadata = node.metadata;
+    if (!metadata?.content) return [];
+    return [
+        {
+            id: `video-batch-${node.id}-initial`,
+            prompt: metadata.prompt || "",
+            createdAt: metadata.startedAt || 0,
+            items: [
+                {
+                    id: `${node.id}-initial`,
+                    content: metadata.content,
+                    storageKey: metadata.storageKey,
+                    naturalWidth: metadata.naturalWidth,
+                    naturalHeight: metadata.naturalHeight,
+                    bytes: metadata.bytes,
+                    mimeType: metadata.mimeType,
+                    status: NODE_STATUS_SUCCESS,
+                    videoTaskId: metadata.videoTaskId,
+                    videoTaskVideoId: metadata.videoTaskVideoId,
+                    startedAt: metadata.startedAt,
+                },
+            ],
+        },
+    ];
+}
+
+function updateVideoCandidateTask(
+    nodes: CanvasNodeData[],
+    nodeId: string,
+    batchId: string,
+    candidateId: string,
+    task: VideoResponse,
+    config: AiConfig,
+    startedAt: number,
+    fallbackSize: { width: number; height: number },
+) {
+    const url = task.video_url || task.url || "";
+    const completed = canvasVideoTaskCompleted(task);
+    const failed = canvasVideoTaskFailed(task) || (completed && !url);
+    const taskStartedAt = parseCanvasVideoTaskTime(task.started_at ?? task.startedAt ?? task.created_at ?? task.createdAt) || startedAt;
+
+    return nodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        const videoCandidateBatches = (node.metadata?.videoCandidateBatches || []).map((batch) =>
+            batch.id !== batchId
+                ? batch
+                : {
+                    ...batch,
+                    items: batch.items.map((candidate) => {
+                        if (candidate.id !== candidateId) return candidate;
+                        const next: CanvasVideoCandidate = {
+                            ...candidate,
+                            status: failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
+                            errorDetails: failed ? canvasVideoTaskError(task) : undefined,
+                            progress: completed ? 100 : typeof task.progress === "number" ? Math.max(0, Math.min(100, task.progress)) : candidate.progress || 0,
+                            videoTaskId: task.task_id || task.id || candidate.videoTaskId,
+                            videoTaskVideoId: task.video_id || candidate.videoTaskVideoId,
+                            startedAt: taskStartedAt,
+                        };
+                        if (!completed || !url) return next;
+                        const taskSize = parseCanvasVideoTaskSize(task.size, fallbackSize);
+                        return {
+                            ...next,
+                            content: url,
+                            storageKey: task.storageKey || "",
+                            naturalWidth: taskSize.width,
+                            naturalHeight: taskSize.height,
+                            bytes: 0,
+                            mimeType: "video/mp4",
+                        };
+                    }),
+                },
+        );
+        const latestBatchId = videoCandidateBatches.reduce((latest, batch) => (batch.createdAt >= latest.createdAt ? batch : latest), videoCandidateBatches[0])?.id;
+        const successfulCandidate = videoCandidateBatches
+            .find((batch) => batch.id === batchId)
+            ?.items.find((candidate) => candidate.id === candidateId && candidate.status === NODE_STATUS_SUCCESS && Boolean(candidate.content));
+        const hasCurrentVideo = Boolean(node.metadata?.content);
+        const metadata: CanvasNodeMetadata = {
+            ...node.metadata,
+            videoCandidateBatches,
+            ...(hasCurrentVideo
+                ? {}
+                : {
+                    status: failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
+                    errorDetails: failed ? canvasVideoTaskError(task) : undefined,
+                    startedAt: taskStartedAt,
+                    durationMs: Date.now() - taskStartedAt,
+                    progress: completed ? 100 : typeof task.progress === "number" ? Math.max(0, Math.min(100, task.progress)) : node.metadata?.progress || 0,
+                    videoTaskId: task.task_id || task.id || node.metadata?.videoTaskId,
+                    videoTaskVideoId: task.video_id || node.metadata?.videoTaskVideoId,
+                    model: task.model || config.model,
+                    size: task.size || node.metadata?.size || config.size,
+                    seconds: task.seconds || node.metadata?.seconds || config.videoSeconds,
+                }),
+        };
+        if (!successfulCandidate?.content || batchId !== latestBatchId) return { ...node, metadata };
+        const videoSize = fitNodeSize(successfulCandidate.naturalWidth || fallbackSize.width, successfulCandidate.naturalHeight || fallbackSize.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+        return {
+            ...node,
+            width: videoSize.width,
+            height: videoSize.height,
+            position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
+            metadata: {
+                ...metadata,
+                content: successfulCandidate.content,
+                storageKey: successfulCandidate.storageKey,
+                naturalWidth: successfulCandidate.naturalWidth,
+                naturalHeight: successfulCandidate.naturalHeight,
+                bytes: successfulCandidate.bytes,
+                mimeType: successfulCandidate.mimeType,
+                status: NODE_STATUS_SUCCESS,
+                progress: 100,
+                errorDetails: undefined,
+            },
+        };
+    });
+}
+
+function updateVideoCandidateError(nodes: CanvasNodeData[], nodeId: string, batchId: string, candidateId: string, errorDetails: string) {
+    return nodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        const hasCurrentVideo = Boolean(node.metadata?.content);
+        return {
+            ...node,
+            metadata: {
+                ...node.metadata,
+                ...(hasCurrentVideo ? {} : { status: NODE_STATUS_ERROR, errorDetails }),
+                videoCandidateBatches: (node.metadata?.videoCandidateBatches || []).map((batch) =>
+                    batch.id !== batchId
+                        ? batch
+                        : {
+                            ...batch,
+                            items: batch.items.map((candidate) => (candidate.id === candidateId ? { ...candidate, status: NODE_STATUS_ERROR, errorDetails } : candidate)),
+                        },
+                ),
+            },
+        };
+    });
+}
+
 function canvasImageTaskURLs(task: CanvasImageTask) {
     return [...new Set([...(task.image_urls || []), task.image_url || task.url || ""].map((url) => url.trim()).filter(Boolean))];
 }
@@ -5016,8 +5287,22 @@ function canvasVideoTaskFromMetadata(metadata?: CanvasNodeMetadata): VideoRespon
     };
 }
 
+function canvasVideoTaskFromCandidate(candidate: CanvasVideoCandidate): VideoResponse {
+    return {
+        id: canvasVideoCandidateTaskId(candidate),
+        task_id: candidate.videoTaskId,
+        video_id: candidate.videoTaskVideoId,
+        status: candidate.status,
+        progress: candidate.progress,
+    };
+}
+
 function canvasVideoTaskId(metadata?: CanvasNodeMetadata) {
     return metadata?.videoTaskVideoId || metadata?.videoTaskId || "";
+}
+
+function canvasVideoCandidateTaskId(candidate: CanvasVideoCandidate) {
+    return candidate.videoTaskVideoId || candidate.videoTaskId || "";
 }
 
 function canvasVideoTaskCompleted(task: VideoResponse) {
@@ -5026,6 +5311,10 @@ function canvasVideoTaskCompleted(task: VideoResponse) {
 
 function canvasVideoTaskFailed(task: VideoResponse) {
     return ["failed", "fail", "error", "cancelled", "canceled"].includes((task.status || "").toLowerCase());
+}
+
+function canvasVideoTaskError(task: VideoResponse) {
+    return task.error?.message || (canvasVideoTaskCompleted(task) ? "视频生成完成但没有返回视频地址" : "视频生成失败");
 }
 
 function parseCanvasVideoTaskSize(value: unknown, fallback: { width: number; height: number }) {

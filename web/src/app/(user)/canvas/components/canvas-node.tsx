@@ -51,6 +51,7 @@ type CanvasNodeProps = {
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onOpenCandidatePicker?: (node: CanvasNodeData) => void;
+    onOpenVideoCandidatePicker?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
@@ -78,6 +79,7 @@ type NodeContentRendererProps = {
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     onOpenCandidatePicker?: () => void;
+    onOpenVideoCandidatePicker?: () => void;
     onMoveStart?: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
@@ -115,6 +117,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onToggleBatch,
     onSetBatchPrimary,
     onOpenCandidatePicker,
+    onOpenVideoCandidatePicker,
     onRetry,
     onGenerateImage,
     onViewImage,
@@ -407,13 +410,14 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                             onOpenCandidatePicker={() => onOpenCandidatePicker?.(data)}
+                            onOpenVideoCandidatePicker={() => onOpenVideoCandidatePicker?.(data)}
                             onMoveStart={(event) => onMouseDown(event, data.id)}
                         />
                     ) : null}
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
-                {!isGroup && data.type !== CanvasNodeType.Image && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
+                {!isGroup && data.type !== CanvasNodeType.Image && data.type !== CanvasNodeType.Video && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
                 {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
@@ -468,31 +472,6 @@ function LoadingContent({ node, theme, now }: Pick<NodeContentRendererProps, "no
     const startedAt = typeof node.metadata?.startedAt === "number" ? node.metadata.startedAt : startTimeRef.current;
     const elapsedMs = Math.max(0, currentNow - startedAt);
     const progress = Math.max(0, Math.min(100, Math.round(node.metadata?.progress || 0)));
-
-    if (node.type === CanvasNodeType.Video) {
-        return (
-            <div className="flex h-full w-full flex-col justify-between overflow-hidden p-4" style={{ color: theme.node.text }}>
-                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
-                    <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: selectionBlue }} />
-                    <div className="text-sm font-semibold" style={{ color: selectionBlue }}>
-                        正在创作 {progress}%
-                    </div>
-                    <span className="rounded-full px-2 py-1 text-xs" style={{ background: theme.toolbar.panel, color: theme.node.text }}>
-                        {formatDuration(elapsedMs)}
-                    </span>
-                </div>
-                <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]" style={{ color: theme.node.muted }}>
-                        <span>当前创作进度</span>
-                        <span>{progress}%</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full" style={{ background: theme.node.stroke }}>
-                        <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: selectionBlue }} />
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
@@ -671,7 +650,7 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
     return content;
 }
 
-function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, onOpenVideoCandidatePicker }: NodeContentRendererProps) {
     if (!node.metadata?.content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
@@ -679,7 +658,7 @@ function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
                 <span className="text-sm">空视频节点</span>
             </div>
         );
-    return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    return <VideoContent node={node} theme={theme} onOpenCandidatePicker={onOpenVideoCandidatePicker} />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
@@ -806,6 +785,65 @@ function ImageGenerationOverlay({ node, theme }: Pick<NodeContentRendererProps, 
     }, []);
 
     const loadingCandidates = node.metadata?.imageCandidateBatches?.flatMap((batch) => batch.items).filter((candidate) => candidate.status === "loading") || [];
+    const startedAt = Math.min(...loadingCandidates.map((candidate) => candidate.startedAt || startTimeRef.current));
+    const elapsedMs = Math.max(0, localNow - startedAt);
+    const reportedProgress = loadingCandidates.reduce((progress, candidate) => Math.max(progress, candidate.progress || 0), 0);
+    const progress = Math.max(0, Math.min(100, Math.round(reportedProgress)));
+
+    return (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl bg-black/55 px-5 text-center backdrop-blur-md" style={{ color: theme.node.text }}>
+            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: `${theme.node.text}4d`, borderTopColor: theme.node.text }} />
+            <span className="text-xs font-medium tracking-[0.18em]">{progress > 0 ? `生成中 ${progress}%` : "生成中"}</span>
+            <span className="rounded-full border px-2.5 py-1 text-xs" style={{ borderColor: `${theme.node.text}3d`, background: "rgba(0,0,0,.16)" }}>
+                {formatDuration(elapsedMs)}
+            </span>
+            {progress > 0 ? (
+                <div className="h-1.5 w-32 overflow-hidden rounded-full" style={{ background: `${theme.node.text}33` }}>
+                    <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: theme.node.text }} />
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function VideoContent({ node, theme, onOpenCandidatePicker }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onOpenCandidatePicker?: () => void }) {
+    const isGeneratingCandidates = Boolean(node.metadata?.videoCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === "loading")));
+    const successfulCandidateBatchCount = node.metadata?.videoCandidateBatches?.filter((batch) => batch.items.some((candidate) => candidate.status === "success" && candidate.content)).length || 0;
+
+    return (
+        <div className="relative h-full w-full overflow-hidden rounded-3xl">
+            <video src={node.metadata?.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />
+            {isGeneratingCandidates ? <VideoGenerationOverlay node={node} theme={theme} /> : null}
+            {successfulCandidateBatchCount > 1 ? (
+                <button
+                    type="button"
+                    className="absolute right-2.5 top-2.5 z-30 flex h-8 cursor-pointer items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
+                    style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
+                    aria-label={`查看 ${successfulCandidateBatchCount} 个候选视频`}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenCandidatePicker?.();
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <Video className="size-3.5 text-[#2f80ff]" />
+                    <span className="leading-none">{successfulCandidateBatchCount}</span>
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
+function VideoGenerationOverlay({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const startTimeRef = useRef(Date.now());
+    const [localNow, setLocalNow] = useState(Date.now());
+    useEffect(() => {
+        const timer = window.setInterval(() => setLocalNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
+
+    const loadingCandidates = node.metadata?.videoCandidateBatches?.flatMap((batch) => batch.items).filter((candidate) => candidate.status === "loading") || [];
     const startedAt = Math.min(...loadingCandidates.map((candidate) => candidate.startedAt || startTimeRef.current));
     const elapsedMs = Math.max(0, localNow - startedAt);
     const reportedProgress = loadingCandidates.reduce((progress, candidate) => Math.max(progress, candidate.progress || 0), 0);

@@ -47,6 +47,29 @@ export type CanvasImageCandidateBatch = {
     items: CanvasImageCandidate[];
 };
 
+export type CanvasVideoCandidate = {
+    id: string;
+    content?: string;
+    storageKey?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    bytes?: number;
+    mimeType?: string;
+    status: CanvasNodeStatus;
+    progress?: number;
+    videoTaskId?: string;
+    videoTaskVideoId?: string;
+    startedAt?: number;
+    errorDetails?: string;
+};
+
+export type CanvasVideoCandidateBatch = {
+    id: string;
+    prompt: string;
+    createdAt: number;
+    items: CanvasVideoCandidate[];
+};
+
 export type CameraControlOptions = {
     enabled: boolean;
     camera: string;
@@ -95,7 +118,10 @@ export type CanvasNodeMetadata = {
     batchChildIds?: string[];
     batchUsesReferenceImages?: boolean;
     imageCandidateBatches?: CanvasImageCandidateBatch[];
+    videoCandidateBatches?: CanvasVideoCandidateBatch[];
     reuseImageAsReference?: boolean;
+    videoCustomSeconds?: boolean;
+    videoBitrate?: "standard" | "high";
     primaryImageId?: string;
     imageBatchExpanded?: boolean;
     storageKey?: string;

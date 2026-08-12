@@ -57,7 +57,7 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
                             <button
                                 key={ratio.value}
                                 type="button"
-                                className="flex min-w-[52px] flex-1 flex-col items-center justify-center gap-1.5 rounded-xl px-1.5 py-2 text-xs font-medium transition hover:opacity-90"
+                                className="flex min-w-[52px] flex-1 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl px-1.5 py-2 text-xs font-medium transition hover:opacity-90"
                                 style={{ background: selected.ratio.value === ratio.value ? theme.toolbar.activeBg : "transparent", color: selected.ratio.value === ratio.value ? theme.node.text : theme.node.muted }}
                                 onClick={() => selectRatio(ratio)}
                             >
@@ -96,7 +96,7 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
                     <SectionTitle>生成张数</SectionTitle>
                     <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_minmax(82px,1.25fr)] gap-1.5 rounded-2xl p-2" style={{ background: theme.node.fill }}>
                         {[1, 2, 3, 4].map((value) => (
-                            <button key={value} type="button" className="h-11 rounded-xl text-sm font-medium transition hover:opacity-90" style={{ background: count === value ? theme.toolbar.activeBg : "transparent", color: count === value ? theme.node.text : theme.node.muted }} onClick={() => onConfigChange("count", String(value))}>
+                            <button key={value} type="button" className="h-11 cursor-pointer rounded-xl text-sm font-medium transition hover:opacity-90" style={{ background: count === value ? theme.toolbar.activeBg : "transparent", color: count === value ? theme.node.text : theme.node.muted }} onClick={() => onConfigChange("count", String(value))}>
                                 {value} 张
                             </button>
                         ))}
@@ -120,7 +120,7 @@ function SegmentedOptions<T extends string | number>({ options, selected, theme,
     return (
         <div className="grid grid-flow-col auto-cols-fr gap-1.5 rounded-2xl p-2" style={{ background: theme.node.fill }}>
             {options.map((item) => (
-                <button key={item.value} type="button" className="h-12 rounded-xl px-2 text-sm font-medium transition hover:opacity-90" style={{ background: selected === item.value ? theme.toolbar.activeBg : "transparent", color: selected === item.value ? theme.node.text : theme.node.muted }} onClick={() => onSelect(item)}>
+                <button key={item.value} type="button" className="h-12 cursor-pointer rounded-xl px-2 text-sm font-medium transition hover:opacity-90" style={{ background: selected === item.value ? theme.toolbar.activeBg : "transparent", color: selected === item.value ? theme.node.text : theme.node.muted }} onClick={() => onSelect(item)}>
                     {item.label}
                 </button>
             ))}
