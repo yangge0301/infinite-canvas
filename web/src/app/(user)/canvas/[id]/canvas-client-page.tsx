@@ -599,6 +599,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 void pollCanvasImageTaskStatus(candidate.imageTaskId)
                     .then((task) => {
                         setNodes((prev) => updateImageCandidateTask(prev, node.id, batchId, candidate.id, task, candidate.startedAt || Date.now(), { width: node.width, height: node.height }));
+                        if (canvasImageTaskFailed(task)) message.error(canvasImageTaskError(task));
                     })
                     .catch(() => undefined)
                     .finally(() => {
@@ -622,7 +623,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         pollCanvasTasks();
         const timer = window.setInterval(pollCanvasTasks, VIDEO_POLL_INTERVAL_MS);
         return () => window.clearInterval(timer);
-    }, [effectiveConfig, isAiConfigReady, projectLoaded]);
+    }, [effectiveConfig, isAiConfigReady, message, projectLoaded]);
 
     useEffect(() => {
         if (!hasLoadingTimedNodes) return;
@@ -2770,6 +2771,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                 try {
                                     const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, { nodeId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
                                     setNodes((prev) => updateImageCandidateTask(prev, nodeId, candidateBatchId, targetId, task, generationStartedAt, imageSize));
+                                    if (canvasImageTaskFailed(task)) message.error(canvasImageTaskError(task));
                                     return true;
                                 } catch (error) {
                                     const errorDetails = error instanceof Error ? error.message : "生成失败";
@@ -4746,6 +4748,14 @@ function canvasImageTaskURLs(task: CanvasImageTask) {
     return [...new Set([...(task.image_urls || []), task.image_url || task.url || ""].map((url) => url.trim()).filter(Boolean))];
 }
 
+function canvasImageTaskFailed(task: CanvasImageTask) {
+    return canvasTaskFailed(task.status) || (canvasTaskCompleted(task.status) && !canvasImageTaskURLs(task).length);
+}
+
+function canvasImageTaskError(task: CanvasImageTask) {
+    return task.error?.message || task.error_detail || "图片生成失败";
+}
+
 function canvasImageTaskChildIds(nodeId: string, task: CanvasImageTask) {
     return canvasImageTaskURLs(task).map((_, index) => `${nodeId}-result-${index}`);
 }
@@ -4790,7 +4800,7 @@ function updateImageCandidateTask(
 ) {
     const url = canvasImageTaskURLs(task)[0] || "";
     const completed = canvasTaskCompleted(task.status) || Boolean(url);
-    const failed = canvasTaskFailed(task.status) || (completed && !url);
+    const failed = canvasImageTaskFailed(task);
     const taskStartedAt = parseCanvasTaskTime(task.started_at ?? task.startedAt ?? task.created_at ?? task.createdAt) || startedAt;
 
     return nodes.map((node) => {
@@ -4809,7 +4819,7 @@ function updateImageCandidateTask(
                                 const next: CanvasImageCandidate = {
                                     ...candidate,
                                     status: failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
-                                    errorDetails: failed ? task.error?.message || task.error_detail || (completed ? "图片生成完成但没有返回图片地址" : "图片生成失败") : undefined,
+                                    errorDetails: failed ? canvasImageTaskError(task) : undefined,
                                     progress: completed ? 100 : typeof task.progress === "number" ? Math.max(0, Math.min(100, task.progress)) : candidate.progress || 0,
                                     imageTaskId: task.id || candidate.imageTaskId,
                                     imageTaskResultId: completed ? task.id || candidate.imageTaskResultId : undefined,

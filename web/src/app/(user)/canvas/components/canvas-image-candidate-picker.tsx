@@ -15,7 +15,11 @@ type CanvasImageCandidatePickerProps = {
 
 export function CanvasImageCandidatePicker({ node, batches, onSelect, onClose }: CanvasImageCandidatePickerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const candidates = batches.flatMap((batch, batchIndex) => batch.items.map((candidate, itemIndex) => ({ batch, batchIndex, candidate, itemIndex })));
+    const candidates = batches.flatMap((batch, batchIndex) =>
+        batch.items
+            .filter((candidate) => candidate.status === "success" && candidate.content)
+            .map((candidate, itemIndex) => ({ batch, batchIndex, candidate, itemIndex })),
+    );
 
     return (
         <section
@@ -56,13 +60,12 @@ export function CanvasImageCandidatePicker({ node, batches, onSelect, onClose }:
                             </div>
                             <button
                                 type="button"
-                                disabled={!candidate.content}
-                                className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl border text-left transition hover:-translate-y-0.5 hover:border-[#2f80ff] disabled:cursor-not-allowed disabled:opacity-50"
+                                className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl border text-left transition hover:-translate-y-0.5 hover:border-[#2f80ff]"
                                 style={{ background: theme.node.fill, borderColor: theme.node.stroke }}
-                                onClick={() => candidate.content && onSelect(candidate)}
+                                onClick={() => onSelect(candidate)}
                             >
-                                {candidate.content ? <img src={candidate.content} alt={`第 ${batchIndex + 1} 次生成图片 ${itemIndex + 1}`} className="block size-full object-cover" /> : <CandidateStatus candidate={candidate} />}
-                                {candidate.content ? <span className="absolute inset-x-0 bottom-0 translate-y-full bg-black/70 px-2 py-1.5 text-center text-[11px] font-medium text-white transition-transform group-hover:translate-y-0">替换当前图片</span> : null}
+                                <img src={candidate.content} alt={`第 ${batchIndex + 1} 次生成图片 ${itemIndex + 1}`} className="block size-full object-cover" />
+                                <span className="absolute inset-x-0 bottom-0 translate-y-full bg-black/70 px-2 py-1.5 text-center text-[11px] font-medium text-white transition-transform group-hover:translate-y-0">替换当前图片</span>
                             </button>
                         </article>
                     ))}
@@ -74,9 +77,4 @@ export function CanvasImageCandidatePicker({ node, batches, onSelect, onClose }:
 
 function formatCreatedAt(createdAt: number) {
     return new Date(createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function CandidateStatus({ candidate }: { candidate: CanvasImageCandidate }) {
-    const label = candidate.status === "loading" ? "生成中…" : candidate.status === "error" ? "生成失败" : "暂无图片";
-    return <span className="flex size-full items-center justify-center px-3 text-center text-xs opacity-50">{label}</span>;
 }

@@ -727,6 +727,7 @@ function ImageContent({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
     const isGeneratingCandidates = Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === "loading")));
+    const successfulCandidateBatchCount = node.metadata?.imageCandidateBatches?.filter((batch) => batch.items.some((candidate) => candidate.status === "success" && candidate.content)).length || 0;
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -775,12 +776,12 @@ function ImageContent({
                     设为主图
                 </button>
             ) : null}
-            {node.metadata?.imageCandidateBatches && node.metadata.imageCandidateBatches.length > 1 ? (
+            {successfulCandidateBatchCount > 1 ? (
                 <button
                     type="button"
                     className="absolute right-2.5 top-2.5 z-30 flex h-8 items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
                     style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
-                    aria-label={`查看 ${node.metadata.imageCandidateBatches.length} 批候选图片`}
+                    aria-label={`查看 ${successfulCandidateBatchCount} 批候选图片`}
                     onClick={(event) => {
                         event.stopPropagation();
                         onOpenCandidatePicker?.();
@@ -789,7 +790,7 @@ function ImageContent({
                     onPointerDown={(event) => event.stopPropagation()}
                 >
                     <Images className="size-3.5 text-[#2f80ff]" />
-                    <span className="leading-none">{node.metadata.imageCandidateBatches.length}</span>
+                    <span className="leading-none">{successfulCandidateBatchCount}</span>
                 </button>
             ) : null}
         </BatchFrame>
