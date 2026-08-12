@@ -19,6 +19,10 @@ const ratioOptions = [
 const qualityOptions = [
     { value: "480p", label: "480P" },
     { value: "720p", label: "720P" },
+    { value: "768p", label: "768P" },
+    { value: "1080p", label: "1080P" },
+    { value: "2k", label: "2K" },
+    { value: "4k", label: "4K" },
 ] as const;
 
 const bitrateOptions = [
@@ -170,11 +174,17 @@ function clampSeconds(value: string) {
 }
 
 function normalizeResolution(value: string) {
-    return value === "480" || value === "480p" || value === "low" ? "480p" : "720p";
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "480" || normalized === "480p" || normalized === "low") return "480p";
+    if (normalized === "768" || normalized === "768p") return "768p";
+    if (normalized === "1080" || normalized === "1080p") return "1080p";
+    if (normalized === "2k") return "2k";
+    if (normalized === "4k") return "4k";
+    return "720p";
 }
 
 function sizeForRatio(ratio: string, resolution: string) {
-    const longEdge = resolution === "480p" ? 864 : 1280;
+    const longEdge = { "480p": 864, "720p": 1280, "768p": 1366, "1080p": 1920, "2k": 2560, "4k": 3840 }[resolution] || 1280;
     const [width, height] = ratio.split(":").map(Number);
     if (!width || !height) return "1280x720";
     if (width >= height) return `${longEdge}x${Math.max(16, Math.round((longEdge * height) / width / 16) * 16)}`;
