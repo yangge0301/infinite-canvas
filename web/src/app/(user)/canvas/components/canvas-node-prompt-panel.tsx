@@ -49,6 +49,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
     const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
+    const isImageGenerating =
+        mode === "image" &&
+        (isRunning ||
+            node.metadata?.status === "loading" ||
+            Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === "loading"))));
 
     useEffect(() => {
         setPrompt(sourcePrompt);
@@ -63,7 +68,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = prompt.trim();
-        if (!canSubmit || isRunning) return;
+        if (!canSubmit || isRunning || isImageGenerating) return;
         onGenerate(node.id, mode, text);
         if (!isPanorama) setPrompt("");
     };
@@ -88,7 +93,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
-            <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
+            <div className={`mt-2 flex min-w-0 items-center justify-between gap-2 ${isImageGenerating ? "pointer-events-none cursor-not-allowed opacity-45" : ""}`} aria-disabled={isImageGenerating} inert={isImageGenerating}>
                 <div className="flex min-w-0 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
@@ -126,7 +131,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 <Button
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    disabled={isRunning || !canSubmit}
+                    disabled={isRunning || isImageGenerating || !canSubmit}
                     onClick={submit}
                     aria-label="生成"
                 >
@@ -135,7 +140,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             <CreditSymbol />
                             {credits.toLocaleString()}
                         </span>
-                        {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                        {isImageGenerating ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                     </span>
                 </Button>
             </div>
