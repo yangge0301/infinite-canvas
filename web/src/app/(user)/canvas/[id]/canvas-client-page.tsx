@@ -4808,7 +4808,8 @@ function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeDat
     const isPanorama = isPanoramaNodeType(node.type);
     const next = { ...node, metadata: { ...node.metadata, ...safePatch, ...(isPanorama ? { size: PANORAMA_IMAGE_SIZE } : {}) } };
     const spec = isPanorama ? NODE_DEFAULT_SIZE[CanvasNodeType.Panorama] : node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-    const size = !isPanorama && typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
+    // 比例是节点的展示属性：即使已有媒体内容，切换比例也应立即同步画布外框。
+    const size = !isPanorama && typeof safePatch.size === "string" ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
 }
 
