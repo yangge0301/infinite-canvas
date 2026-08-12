@@ -24,6 +24,29 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
+export type CanvasImageCandidate = {
+    id: string;
+    content?: string;
+    storageKey?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    bytes?: number;
+    mimeType?: string;
+    status: CanvasNodeStatus;
+    progress?: number;
+    imageTaskId?: string;
+    imageTaskResultId?: string;
+    startedAt?: number;
+    errorDetails?: string;
+};
+
+export type CanvasImageCandidateBatch = {
+    id: string;
+    prompt: string;
+    createdAt: number;
+    items: CanvasImageCandidate[];
+};
+
 export type CameraControlOptions = {
     enabled: boolean;
     camera: string;
@@ -71,6 +94,7 @@ export type CanvasNodeMetadata = {
     batchRootId?: string;
     batchChildIds?: string[];
     batchUsesReferenceImages?: boolean;
+    imageCandidateBatches?: CanvasImageCandidateBatch[];
     primaryImageId?: string;
     imageBatchExpanded?: boolean;
     storageKey?: string;

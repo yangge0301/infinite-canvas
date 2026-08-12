@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Images, Music2, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -50,6 +50,7 @@ type CanvasNodeProps = {
     onTitleChange: (nodeId: string, title: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
+    onOpenCandidatePicker?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
@@ -76,6 +77,7 @@ type NodeContentRendererProps = {
     onViewImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    onOpenCandidatePicker?: () => void;
     onMoveStart?: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
@@ -112,6 +114,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onTitleChange,
     onToggleBatch,
     onSetBatchPrimary,
+    onOpenCandidatePicker,
     onRetry,
     onGenerateImage,
     onViewImage,
@@ -403,13 +406,14 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onViewImage={onViewImage}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                            onOpenCandidatePicker={() => onOpenCandidatePicker?.(data)}
                             onMoveStart={(event) => onMouseDown(event, data.id)}
                         />
                     ) : null}
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
-                {!isGroup && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
+                {!isGroup && data.type !== CanvasNodeType.Image && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
                 {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
@@ -623,6 +627,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             batchRecovering={props.batchRecovering}
             onToggleBatch={props.onToggleBatch}
             onSetBatchPrimary={props.onSetBatchPrimary}
+            onOpenCandidatePicker={props.onOpenCandidatePicker}
         />
     );
 }
@@ -642,6 +647,7 @@ function PanoramaNodeContent(props: NodeContentRendererProps) {
             batchRecovering={props.batchRecovering}
             onToggleBatch={props.onToggleBatch}
             onSetBatchPrimary={props.onSetBatchPrimary}
+            onOpenCandidatePicker={props.onOpenCandidatePicker}
             media={<CanvasPanoramaViewer src={src} alt={props.node.title} proxyGeneratedPanorama={proxyGeneratedPanorama} expandOnDoubleClick={!props.isBatchRoot} onMoveStart={props.onMoveStart} onOpen={props.onViewImage ? () => props.onViewImage?.(props.node) : undefined} />}
         />
     );
@@ -704,6 +710,7 @@ function ImageContent({
     batchRecovering,
     onToggleBatch,
     onSetBatchPrimary,
+    onOpenCandidatePicker,
     media,
 }: {
     node: CanvasNodeData;
@@ -714,10 +721,12 @@ function ImageContent({
     batchRecovering: boolean;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    onOpenCandidatePicker?: () => void;
     media?: ReactNode;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
+    const isGeneratingCandidates = Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === "loading")));
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -732,6 +741,7 @@ function ImageContent({
                     />
                 )}
             </div>
+            {isGeneratingCandidates ? <ImageGenerationOverlay node={node} theme={theme} /> : null}
             {isBatchRoot ? (
                 <button
                     type="button"
@@ -765,7 +775,54 @@ function ImageContent({
                     设为主图
                 </button>
             ) : null}
+            {node.metadata?.imageCandidateBatches && node.metadata.imageCandidateBatches.length > 1 ? (
+                <button
+                    type="button"
+                    className="absolute right-2.5 top-2.5 z-30 flex h-8 items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
+                    style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
+                    aria-label={`查看 ${node.metadata.imageCandidateBatches.length} 批候选图片`}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenCandidatePicker?.();
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <Images className="size-3.5 text-[#2f80ff]" />
+                    <span className="leading-none">{node.metadata.imageCandidateBatches.length}</span>
+                </button>
+            ) : null}
         </BatchFrame>
+    );
+}
+
+function ImageGenerationOverlay({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const startTimeRef = useRef(Date.now());
+    const [localNow, setLocalNow] = useState(Date.now());
+    useEffect(() => {
+        const timer = window.setInterval(() => setLocalNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
+
+    const loadingCandidates = node.metadata?.imageCandidateBatches?.flatMap((batch) => batch.items).filter((candidate) => candidate.status === "loading") || [];
+    const startedAt = Math.min(...loadingCandidates.map((candidate) => candidate.startedAt || startTimeRef.current));
+    const elapsedMs = Math.max(0, localNow - startedAt);
+    const reportedProgress = loadingCandidates.reduce((progress, candidate) => Math.max(progress, candidate.progress || 0), 0);
+    const progress = Math.max(0, Math.min(100, Math.round(reportedProgress)));
+
+    return (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl bg-black/55 px-5 text-center backdrop-blur-md" style={{ color: theme.node.text }}>
+            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: `${theme.node.text}4d`, borderTopColor: theme.node.text }} />
+            <span className="text-xs font-medium tracking-[0.18em]">{progress > 0 ? `生成中 ${progress}%` : "生成中"}</span>
+            <span className="rounded-full border px-2.5 py-1 text-xs" style={{ borderColor: `${theme.node.text}3d`, background: "rgba(0,0,0,.16)" }}>
+                {formatDuration(elapsedMs)}
+            </span>
+            {progress > 0 ? (
+                <div className="h-1.5 w-32 overflow-hidden rounded-full" style={{ background: `${theme.node.text}33` }}>
+                    <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: theme.node.text }} />
+                </div>
+            ) : null}
+        </div>
     );
 }
 

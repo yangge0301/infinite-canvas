@@ -14,6 +14,7 @@ type CanvasPromptChipInputProps = {
     references: CanvasResourceReference[];
     onChange: (value: string) => void;
     onSubmit?: () => void;
+    onFocus?: () => void;
     className?: string;
     style?: CSSProperties;
     placeholder?: string;
@@ -28,7 +29,7 @@ type PromptToken =
     | { type: "text"; value: string }
     | { type: "reference"; label: string };
 
-export function CanvasPromptChipInput({ value, references, onChange, onSubmit, className, style, placeholder }: CanvasPromptChipInputProps) {
+export function CanvasPromptChipInput({ value, references, onChange, onSubmit, onFocus, className, style, placeholder }: CanvasPromptChipInputProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -139,6 +140,8 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                 aria-label={placeholder}
                 className={`${className || ""} overflow-y-auto whitespace-pre-wrap break-words outline-none`}
                 style={{ ...style, cursor: "text" }}
+                onFocus={onFocus}
+                onPointerDown={onFocus}
                 onInput={() => {
                     if (!composingRef.current) syncFromEditor();
                 }}

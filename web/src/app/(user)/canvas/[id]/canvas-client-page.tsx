@@ -48,6 +48,7 @@ import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "../components/canva
 import { InfiniteCanvas } from "../components/infinite-canvas";
 import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
+import { CanvasImageCandidatePicker } from "../components/canvas-image-candidate-picker";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasVideoFrameOption } from "../components/canvas-node-prompt-panel";
 import type { CanvasVideoResourceOption } from "../components/canvas-video-settings-popover";
 import { CanvasToolbar } from "../components/canvas-toolbar";
@@ -69,6 +70,8 @@ import {
     type CanvasDirectorCapture,
     type CanvasDirectorPanorama,
     type CanvasImageGenerationType,
+    type CanvasImageCandidate,
+    type CanvasImageCandidateBatch,
     type CanvasNodeData,
     type CanvasNodeMetadata,
     type CanvasPendingAgentRequest,
@@ -381,6 +384,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+    const [candidatePickerNodeId, setCandidatePickerNodeId] = useState<string | null>(null);
     const [agentPanel, setAgentPanel] = useState(DEFAULT_CANVAS_AGENT_PANEL);
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [titleEditing, setTitleEditing] = useState(false);
@@ -418,7 +422,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const pollingVideoNodeIdsRef = useRef(new Set<string>());
     const pollingImageNodeIdsRef = useRef(new Set<string>());
     const pollingAudioNodeIdsRef = useRef(new Set<string>());
-    const hasLoadingTimedNodes = nodes.some((node) => node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && (node.type === CanvasNodeType.Video || isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Audio));
+    const hasLoadingTimedNodes = nodes.some(
+        (node) =>
+            (node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && (node.type === CanvasNodeType.Video || isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Audio)) ||
+            Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === NODE_STATUS_LOADING))),
+    );
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -573,6 +581,28 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     .catch(() => undefined)
                     .finally(() => {
                         pollingImageNodeIdsRef.current.delete(node.id);
+                    });
+            });
+            const candidateImageTargets = nodesRef.current.flatMap((node) =>
+                node.type === CanvasNodeType.Image
+                    ? (node.metadata?.imageCandidateBatches || []).flatMap((batch) =>
+                        batch.items
+                            .filter((candidate) => candidate.status === NODE_STATUS_LOADING && !candidate.content && candidate.imageTaskId)
+                            .map((candidate) => ({ node, batchId: batch.id, candidate })),
+                    )
+                    : [],
+            );
+            candidateImageTargets.forEach(({ node, batchId, candidate }) => {
+                const pollingId = `${node.id}:${batchId}:${candidate.id}`;
+                if (pollingImageNodeIdsRef.current.has(pollingId) || !candidate.imageTaskId) return;
+                pollingImageNodeIdsRef.current.add(pollingId);
+                void pollCanvasImageTaskStatus(candidate.imageTaskId)
+                    .then((task) => {
+                        setNodes((prev) => updateImageCandidateTask(prev, node.id, batchId, candidate.id, task, candidate.startedAt || Date.now(), { width: node.width, height: node.height }));
+                    })
+                    .catch(() => undefined)
+                    .finally(() => {
+                        pollingImageNodeIdsRef.current.delete(pollingId);
                     });
             });
             const audioTargets = nodesRef.current.filter((node) => node.type === CanvasNodeType.Audio && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && node.metadata.audioTaskId);
@@ -805,6 +835,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
+    const candidatePickerNode = candidatePickerNodeId ? nodeById.get(candidatePickerNodeId) || null : null;
     const openDirectorNode = openDirectorNodeId ? nodeById.get(openDirectorNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
@@ -1039,6 +1070,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setToolbarNodeId(null);
         setDialogNodeId(null);
         setEditingNodeId(null);
+        setCandidatePickerNodeId(null);
     }, [cancelPendingConnectionCreate]);
 
     const clearCanvas = useCallback(() => {
@@ -1821,6 +1853,31 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     : node,
             ),
         );
+    }, []);
+
+    const selectImageCandidate = useCallback((nodeId: string, candidate: CanvasImageCandidate) => {
+        if (!candidate.content) return;
+        setNodes((prev) =>
+            prev.map((node) =>
+                node.id === nodeId
+                    ? {
+                        ...node,
+                        metadata: {
+                            ...node.metadata,
+                            content: candidate.content,
+                            storageKey: candidate.storageKey || "",
+                            naturalWidth: candidate.naturalWidth || node.metadata?.naturalWidth,
+                            naturalHeight: candidate.naturalHeight || node.metadata?.naturalHeight,
+                            bytes: candidate.bytes || 0,
+                            mimeType: candidate.mimeType || node.metadata?.mimeType || "image/png",
+                            status: NODE_STATUS_SUCCESS,
+                            errorDetails: undefined,
+                        },
+                    }
+                    : node,
+            ),
+        );
+        setCandidatePickerNodeId(null);
     }, []);
 
     const openTextEditor = useCallback((node: CanvasNodeData) => {
@@ -2657,6 +2714,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
+                    const keepsImageCandidates =
+                        isImageNode &&
+                        !isEmptyImageNode &&
+                        !sourceNode?.metadata?.isBatchRoot &&
+                        !sourceNode?.metadata?.batchRootId &&
+                        !isKIESeedreamLayerDecompositionModel(generationConfig.model);
                     const sourceReference =
                         isImageNode && sourceNode?.metadata?.content
                             ? [{ id: sourceNode.id, name: `image-${sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
@@ -2675,7 +2738,47 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const targetIds = count > 1 ? childIds : [rootId];
                     const targetTaskIds = Object.fromEntries(targetIds.map((id) => [id, `client_image_task_${id}`]));
                     const primaryTargetId = targetIds[0];
+                    const candidateBatchId = nanoid();
+                    const candidateItems: CanvasImageCandidate[] = targetIds.map((id) => ({ id, status: NODE_STATUS_LOADING, progress: 0, imageTaskId: targetTaskIds[id], startedAt: generationStartedAt }));
                     pendingChildIds = isEmptyImageNode ? childIds : [rootId, ...childIds];
+                    if (keepsImageCandidates) {
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === nodeId
+                                    ? {
+                                        ...node,
+                                        metadata: {
+                                            ...node.metadata,
+                                            prompt: effectivePrompt,
+                                            status: NODE_STATUS_SUCCESS,
+                                            errorDetails: undefined,
+                                            imageCandidateBatches: [
+                                                ...imageCandidateBatchesForNode(node),
+                                                { id: candidateBatchId, prompt: effectivePrompt, createdAt: generationStartedAt, items: candidateItems },
+                                            ],
+                                        },
+                                    }
+                                    : node,
+                            ),
+                        );
+                    }
+                    if (keepsImageCandidates) {
+                        const taskResults = await Promise.all(
+                            targetIds.map(async (targetId) => {
+                                try {
+                                    const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, sourceReference, { nodeId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                    setNodes((prev) => updateImageCandidateTask(prev, nodeId, candidateBatchId, targetId, task, generationStartedAt, imageSize));
+                                    return true;
+                                } catch (error) {
+                                    const errorDetails = error instanceof Error ? error.message : "生成失败";
+                                    setNodes((prev) => updateImageCandidateError(prev, nodeId, candidateBatchId, targetId, errorDetails));
+                                    return false;
+                                }
+                            }),
+                        );
+                        if (taskResults.some((result) => !result)) message.error(taskResults.some(Boolean) ? "部分图片任务创建失败" : "全部图片任务创建失败");
+                        return;
+                    }
                     const rootNode: CanvasNodeData = {
                         id: rootId,
                         type: CanvasNodeType.Image,
@@ -3714,7 +3817,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             showImageInfo={showImageInfo}
                             resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || []}
-                            now={node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && (node.type === CanvasNodeType.Video || isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Audio) ? canvasNow : undefined}
+                            now={
+                                (node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && (node.type === CanvasNodeType.Video || isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Audio)) ||
+                                Boolean(node.metadata?.imageCandidateBatches?.some((batch) => batch.items.some((candidate) => candidate.status === NODE_STATUS_LOADING)))
+                                    ? canvasNow
+                                    : undefined
+                            }
                             renderPanel={(panelNode) =>
                                 panelNode.type === CanvasNodeType.Config ? (
                                     <CanvasConfigComposer
@@ -3737,6 +3845,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                             setNodeImageSettingsOpen(open);
                                             if (open) setToolbarNodeId(null);
                                         }}
+                                        onPromptFocus={() => setCandidatePickerNodeId(null)}
                                     />
                                 )
                             }
@@ -3773,6 +3882,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onTitleChange={handleNodeTitleChange}
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
+                            onOpenCandidatePicker={(node) => setCandidatePickerNodeId(node.id)}
                             onRetry={(node) => void handleRetryNode(node)}
                             onGenerateImage={generateImageFromTextNode}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
@@ -3798,6 +3908,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         />
                     ) : null}
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
+                    {candidatePickerNode?.type === CanvasNodeType.Image && candidatePickerNode.metadata?.imageCandidateBatches?.length ? (
+                        <CanvasImageCandidatePicker
+                            node={candidatePickerNode}
+                            batches={candidatePickerNode.metadata.imageCandidateBatches}
+                            onSelect={(candidate) => selectImageCandidate(candidatePickerNode.id, candidate)}
+                            onClose={() => setCandidatePickerNodeId(null)}
+                        />
+                    ) : null}
                     {nodeCreatePosition ? (
                         <NodeCreateMenu
                             position={nodeCreatePosition}
@@ -4377,6 +4495,10 @@ function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }
 
+function imageCandidateMetadata(image: UploadedImage): Pick<CanvasImageCandidate, "content" | "storageKey" | "naturalWidth" | "naturalHeight" | "bytes" | "mimeType"> {
+    return { content: image.url, storageKey: image.storageKey, naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
+}
+
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
     return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
 }
@@ -4466,10 +4588,26 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
         nodes.map(async (node) => {
             const content = node.metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (!isCanvasImageNodeType(node.type) || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
-            if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            if (!isCanvasImageNodeType(node.type)) return node;
+            const imageCandidateBatches = node.metadata?.imageCandidateBatches
+                ? await Promise.all(
+                    node.metadata.imageCandidateBatches.map(async (batch) => ({
+                        ...batch,
+                        items: await Promise.all(
+                            batch.items.map(async (candidate) => {
+                                if (candidate.storageKey) return { ...candidate, content: await resolveImageUrl(candidate.storageKey, candidate.content) };
+                                if (!candidate.content?.startsWith("data:image/")) return candidate;
+                                return { ...candidate, ...imageCandidateMetadata(await uploadImage(candidate.content)) };
+                            }),
+                        ),
+                    })),
+                )
+                : undefined;
+            const metadata = imageCandidateBatches ? { ...node.metadata, imageCandidateBatches } : node.metadata;
+            if (!content) return metadata === node.metadata ? node : { ...node, metadata };
+            if (metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveImageUrl(metadata.storageKey, content) } };
+            if (!content.startsWith("data:image/")) return metadata === node.metadata ? node : { ...node, metadata };
+            return { ...node, metadata: { ...metadata, ...imageMetadata(await uploadImage(content)) } };
         }),
     );
 }
@@ -4608,6 +4746,109 @@ function canvasImageTaskURLs(task: CanvasImageTask) {
 
 function canvasImageTaskChildIds(nodeId: string, task: CanvasImageTask) {
     return canvasImageTaskURLs(task).map((_, index) => `${nodeId}-result-${index}`);
+}
+
+function imageCandidateBatchesForNode(node: CanvasNodeData): CanvasImageCandidateBatch[] {
+    const existingBatches = node.metadata?.imageCandidateBatches;
+    if (existingBatches?.length) return existingBatches;
+    const metadata = node.metadata;
+    if (!metadata?.content) return [];
+    return [
+        {
+            id: `image-batch-${node.id}-initial`,
+            prompt: metadata.prompt || "",
+            createdAt: metadata.startedAt || 0,
+            items: [
+                {
+                    id: `${node.id}-initial`,
+                    content: metadata.content,
+                    storageKey: metadata.storageKey,
+                    naturalWidth: metadata.naturalWidth,
+                    naturalHeight: metadata.naturalHeight,
+                    bytes: metadata.bytes,
+                    mimeType: metadata.mimeType,
+                    status: NODE_STATUS_SUCCESS,
+                    imageTaskId: metadata.imageTaskId,
+                    imageTaskResultId: metadata.imageTaskResultId,
+                    startedAt: metadata.startedAt,
+                },
+            ],
+        },
+    ];
+}
+
+function updateImageCandidateTask(
+    nodes: CanvasNodeData[],
+    nodeId: string,
+    batchId: string,
+    candidateId: string,
+    task: CanvasImageTask,
+    startedAt: number,
+    fallbackSize: { width: number; height: number },
+) {
+    const url = canvasImageTaskURLs(task)[0] || "";
+    const completed = canvasTaskCompleted(task.status) || Boolean(url);
+    const failed = canvasTaskFailed(task.status) || (completed && !url);
+    const taskStartedAt = parseCanvasTaskTime(task.started_at ?? task.startedAt ?? task.created_at ?? task.createdAt) || startedAt;
+
+    return nodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        return {
+            ...node,
+            metadata: {
+                ...node.metadata,
+                imageCandidateBatches: (node.metadata?.imageCandidateBatches || []).map((batch) =>
+                    batch.id !== batchId
+                        ? batch
+                        : {
+                            ...batch,
+                            items: batch.items.map((candidate) => {
+                                if (candidate.id !== candidateId) return candidate;
+                                const next: CanvasImageCandidate = {
+                                    ...candidate,
+                                    status: failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
+                                    errorDetails: failed ? task.error?.message || task.error_detail || (completed ? "图片生成完成但没有返回图片地址" : "图片生成失败") : undefined,
+                                    progress: completed ? 100 : typeof task.progress === "number" ? Math.max(0, Math.min(100, task.progress)) : candidate.progress || 0,
+                                    imageTaskId: task.id || candidate.imageTaskId,
+                                    imageTaskResultId: completed ? task.id || candidate.imageTaskResultId : undefined,
+                                    startedAt: taskStartedAt,
+                                };
+                                if (!completed || !url) return next;
+                                return {
+                                    ...next,
+                                    content: url,
+                                    storageKey: task.storageKey || "",
+                                    naturalWidth: task.width || fallbackSize.width,
+                                    naturalHeight: task.height || fallbackSize.height,
+                                    bytes: task.bytes || 0,
+                                    mimeType: task.mimeType || "image/png",
+                                };
+                            }),
+                        },
+                ),
+            },
+        };
+    });
+}
+
+function updateImageCandidateError(nodes: CanvasNodeData[], nodeId: string, batchId: string, candidateId: string, errorDetails: string) {
+    return nodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        return {
+            ...node,
+            metadata: {
+                ...node.metadata,
+                imageCandidateBatches: (node.metadata?.imageCandidateBatches || []).map((batch) =>
+                    batch.id !== batchId
+                        ? batch
+                        : {
+                            ...batch,
+                            items: batch.items.map((candidate) => (candidate.id === candidateId ? { ...candidate, status: NODE_STATUS_ERROR, errorDetails } : candidate)),
+                        },
+                ),
+            },
+        };
+    });
 }
 
 function applyCanvasImageTaskUpdate(nodes: CanvasNodeData[], nodeId: string, task: CanvasImageTask, startedAt: number, fallbackSize: { width: number; height: number }) {
@@ -4877,7 +5118,28 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
-    return nodes.map((node) => (node.metadata?.status === "loading" && !canvasRecoverableTaskId(node) ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } } : node));
+    return nodes.map((node) => {
+        const metadata = node.metadata;
+        if (!metadata) return node;
+        const imageCandidateBatches = metadata.imageCandidateBatches?.map((batch) => ({
+            ...batch,
+            items: batch.items.map((candidate) =>
+                candidate.status === NODE_STATUS_LOADING && !candidate.imageTaskId
+                    ? { ...candidate, status: NODE_STATUS_ERROR as const, errorDetails: "页面刷新后生成已中断，请重新生成。" }
+                    : candidate,
+            ),
+        }));
+        const rootInterrupted = metadata.status === NODE_STATUS_LOADING && !canvasRecoverableTaskId(node);
+        if (!rootInterrupted && !imageCandidateBatches) return node;
+        return {
+            ...node,
+            metadata: {
+                ...metadata,
+                ...(rootInterrupted ? { status: NODE_STATUS_ERROR as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } : {}),
+                ...(imageCandidateBatches ? { imageCandidateBatches } : {}),
+            },
+        };
+    });
 }
 
 function canvasRecoverableTaskId(node: CanvasNodeData) {
