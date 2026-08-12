@@ -15,11 +15,13 @@ type CanvasImageCandidatePickerProps = {
 
 export function CanvasImageCandidatePicker({ node, batches, onSelect, onClose }: CanvasImageCandidatePickerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const candidates = batches.flatMap((batch, batchIndex) =>
-        batch.items
-            .filter((candidate) => candidate.status === "success" && candidate.content)
-            .map((candidate, itemIndex) => ({ batch, batchIndex, candidate, itemIndex })),
-    );
+    const candidates = batches
+        .flatMap((batch, batchIndex) =>
+            batch.items
+                .filter((candidate) => candidate.status === "success" && candidate.content)
+                .map((candidate, itemIndex) => ({ batch, batchIndex, candidate, itemIndex })),
+        )
+        .sort((left, right) => right.batch.createdAt - left.batch.createdAt || right.batchIndex - left.batchIndex);
 
     return (
         <section

@@ -4805,39 +4805,53 @@ function updateImageCandidateTask(
 
     return nodes.map((node) => {
         if (node.id !== nodeId) return node;
+        const imageCandidateBatches = (node.metadata?.imageCandidateBatches || []).map((batch) =>
+            batch.id !== batchId
+                ? batch
+                : {
+                    ...batch,
+                    items: batch.items.map((candidate) => {
+                        if (candidate.id !== candidateId) return candidate;
+                        const next: CanvasImageCandidate = {
+                            ...candidate,
+                            status: failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
+                            errorDetails: failed ? canvasImageTaskError(task) : undefined,
+                            progress: completed ? 100 : typeof task.progress === "number" ? Math.max(0, Math.min(100, task.progress)) : candidate.progress || 0,
+                            imageTaskId: task.id || candidate.imageTaskId,
+                            imageTaskResultId: completed ? task.id || candidate.imageTaskResultId : undefined,
+                            startedAt: taskStartedAt,
+                        };
+                        if (!completed || !url) return next;
+                        return {
+                            ...next,
+                            content: url,
+                            storageKey: task.storageKey || "",
+                            naturalWidth: task.width || fallbackSize.width,
+                            naturalHeight: task.height || fallbackSize.height,
+                            bytes: task.bytes || 0,
+                            mimeType: task.mimeType || "image/png",
+                        };
+                    }),
+                },
+        );
+        const latestBatchId = imageCandidateBatches.reduce((latest, batch) => (batch.createdAt >= latest.createdAt ? batch : latest), imageCandidateBatches[0])?.id;
+        const successfulCandidate = imageCandidateBatches
+            .find((batch) => batch.id === batchId)
+            ?.items.find((candidate) => candidate.id === candidateId && candidate.status === NODE_STATUS_SUCCESS && Boolean(candidate.content));
+        const metadata = { ...node.metadata, imageCandidateBatches };
+        if (!successfulCandidate?.content || batchId !== latestBatchId) return { ...node, metadata };
         return {
             ...node,
             metadata: {
-                ...node.metadata,
-                imageCandidateBatches: (node.metadata?.imageCandidateBatches || []).map((batch) =>
-                    batch.id !== batchId
-                        ? batch
-                        : {
-                            ...batch,
-                            items: batch.items.map((candidate) => {
-                                if (candidate.id !== candidateId) return candidate;
-                                const next: CanvasImageCandidate = {
-                                    ...candidate,
-                                    status: failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
-                                    errorDetails: failed ? canvasImageTaskError(task) : undefined,
-                                    progress: completed ? 100 : typeof task.progress === "number" ? Math.max(0, Math.min(100, task.progress)) : candidate.progress || 0,
-                                    imageTaskId: task.id || candidate.imageTaskId,
-                                    imageTaskResultId: completed ? task.id || candidate.imageTaskResultId : undefined,
-                                    startedAt: taskStartedAt,
-                                };
-                                if (!completed || !url) return next;
-                                return {
-                                    ...next,
-                                    content: url,
-                                    storageKey: task.storageKey || "",
-                                    naturalWidth: task.width || fallbackSize.width,
-                                    naturalHeight: task.height || fallbackSize.height,
-                                    bytes: task.bytes || 0,
-                                    mimeType: task.mimeType || "image/png",
-                                };
-                            }),
-                        },
-                ),
+                ...metadata,
+                content: successfulCandidate.content,
+                storageKey: successfulCandidate.storageKey,
+                naturalWidth: successfulCandidate.naturalWidth,
+                naturalHeight: successfulCandidate.naturalHeight,
+                bytes: successfulCandidate.bytes,
+                mimeType: successfulCandidate.mimeType,
+                status: NODE_STATUS_SUCCESS,
+                errorDetails: undefined,
             },
         };
     });
