@@ -30,6 +30,10 @@ export type CanvasImageCandidate = {
     storageKey?: string;
     naturalWidth?: number;
     naturalHeight?: number;
+    displayWidth?: number;
+    displayHeight?: number;
+    size?: string;
+    quality?: string;
     bytes?: number;
     mimeType?: string;
     status: CanvasNodeStatus;
@@ -53,6 +57,10 @@ export type CanvasVideoCandidate = {
     storageKey?: string;
     naturalWidth?: number;
     naturalHeight?: number;
+    displayWidth?: number;
+    displayHeight?: number;
+    size?: string;
+    vquality?: string;
     bytes?: number;
     mimeType?: string;
     status: CanvasNodeStatus;

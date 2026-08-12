@@ -1892,22 +1892,28 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (!candidate.content) return;
         setNodes((prev) =>
             prev.map((node) =>
-                node.id === nodeId
-                    ? {
-                        ...node,
-                        metadata: {
-                            ...node.metadata,
-                            content: candidate.content,
-                            storageKey: candidate.storageKey || "",
-                            naturalWidth: candidate.naturalWidth || node.metadata?.naturalWidth,
-                            naturalHeight: candidate.naturalHeight || node.metadata?.naturalHeight,
-                            bytes: candidate.bytes || 0,
-                            mimeType: candidate.mimeType || node.metadata?.mimeType || "image/png",
-                            status: NODE_STATUS_SUCCESS,
-                            errorDetails: undefined,
+                node.id !== nodeId
+                    ? node
+                    : applyCandidateDisplaySize(
+                        {
+                            ...node,
+                            metadata: {
+                                ...node.metadata,
+                                content: candidate.content,
+                                storageKey: candidate.storageKey || "",
+                                naturalWidth: candidate.naturalWidth || node.metadata?.naturalWidth,
+                                naturalHeight: candidate.naturalHeight || node.metadata?.naturalHeight,
+                                size: candidate.size || node.metadata?.size,
+                                quality: candidate.quality || node.metadata?.quality,
+                                bytes: candidate.bytes || 0,
+                                mimeType: candidate.mimeType || node.metadata?.mimeType || "image/png",
+                                status: NODE_STATUS_SUCCESS,
+                                errorDetails: undefined,
+                            },
                         },
-                    }
-                    : node,
+                        candidate.displayWidth,
+                        candidate.displayHeight,
+                    ),
             ),
         );
         setCandidatePickerNodeId(null);
@@ -1917,22 +1923,28 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (!candidate.content) return;
         setNodes((prev) =>
             prev.map((node) =>
-                node.id === nodeId
-                    ? {
-                        ...node,
-                        metadata: {
-                            ...node.metadata,
-                            content: candidate.content,
-                            storageKey: candidate.storageKey || "",
-                            naturalWidth: candidate.naturalWidth || node.metadata?.naturalWidth,
-                            naturalHeight: candidate.naturalHeight || node.metadata?.naturalHeight,
-                            bytes: candidate.bytes || 0,
-                            mimeType: candidate.mimeType || node.metadata?.mimeType || "video/mp4",
-                            status: NODE_STATUS_SUCCESS,
-                            errorDetails: undefined,
+                node.id !== nodeId
+                    ? node
+                    : applyCandidateDisplaySize(
+                        {
+                            ...node,
+                            metadata: {
+                                ...node.metadata,
+                                content: candidate.content,
+                                storageKey: candidate.storageKey || "",
+                                naturalWidth: candidate.naturalWidth || node.metadata?.naturalWidth,
+                                naturalHeight: candidate.naturalHeight || node.metadata?.naturalHeight,
+                                size: candidate.size || node.metadata?.size,
+                                vquality: candidate.vquality || node.metadata?.vquality,
+                                bytes: candidate.bytes || 0,
+                                mimeType: candidate.mimeType || node.metadata?.mimeType || "video/mp4",
+                                status: NODE_STATUS_SUCCESS,
+                                errorDetails: undefined,
+                            },
                         },
-                    }
-                    : node,
+                        candidate.displayWidth,
+                        candidate.displayHeight,
+                    ),
             ),
         );
         setVideoCandidatePickerNodeId(null);
@@ -2799,7 +2811,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const targetTaskIds = Object.fromEntries(targetIds.map((id) => [id, `client_image_task_${id}`]));
                     const primaryTargetId = targetIds[0];
                     const candidateBatchId = nanoid();
-                    const candidateItems: CanvasImageCandidate[] = targetIds.map((id) => ({ id, status: NODE_STATUS_LOADING, progress: 0, imageTaskId: targetTaskIds[id], startedAt: generationStartedAt }));
+                    const candidateItems: CanvasImageCandidate[] = targetIds.map((id) => ({ id, status: NODE_STATUS_LOADING, progress: 0, imageTaskId: targetTaskIds[id], startedAt: generationStartedAt, displayWidth: imageSize.width, displayHeight: imageSize.height, size: generationConfig.size, quality: generationConfig.quality }));
                     pendingChildIds = isEmptyImageNode ? childIds : [rootId, ...childIds];
                     if (keepsImageCandidates) {
                         setNodes((prev) =>
@@ -2988,7 +3000,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         const batchId = `video-batch-${nanoid()}`;
                         const candidateId = `video-candidate-${nanoid()}`;
                         const clientTaskId = `client_video_task_${candidateId}`;
-                        const candidate: CanvasVideoCandidate = { id: candidateId, status: NODE_STATUS_LOADING, progress: 0, startedAt: generationStartedAt };
+                        const candidate: CanvasVideoCandidate = { id: candidateId, status: NODE_STATUS_LOADING, progress: 0, startedAt: generationStartedAt, displayWidth: spec.width, displayHeight: spec.height, size: videoGenerationConfig.size, vquality: videoGenerationConfig.vquality };
                         const batch: CanvasVideoCandidateBatch = { id: batchId, prompt: effectivePrompt, createdAt: generationStartedAt, items: [candidate] };
                         const hasCurrentVideo = Boolean(sourceNode.metadata?.content);
                         pendingChildIds = hasCurrentVideo ? [] : [nodeId];
@@ -4778,6 +4790,19 @@ function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
+function applyCandidateDisplaySize(node: CanvasNodeData, width?: number, height?: number) {
+    if (!width || !height) return node;
+    return {
+        ...node,
+        width,
+        height,
+        position: {
+            x: node.position.x + node.width / 2 - width / 2,
+            y: node.position.y + node.height / 2 - height / 2,
+        },
+    };
+}
+
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
     const safePatch = patch || {};
     const isPanorama = isPanoramaNodeType(node.type);
@@ -4890,6 +4915,10 @@ function videoCandidateBatchesForNode(node: CanvasNodeData): CanvasVideoCandidat
                     storageKey: metadata.storageKey,
                     naturalWidth: metadata.naturalWidth,
                     naturalHeight: metadata.naturalHeight,
+                    displayWidth: node.width,
+                    displayHeight: node.height,
+                    size: metadata.size,
+                    vquality: metadata.vquality,
                     bytes: metadata.bytes,
                     mimeType: metadata.mimeType,
                     status: NODE_STATUS_SUCCESS,
@@ -4973,25 +5002,27 @@ function updateVideoCandidateTask(
                 }),
         };
         if (!successfulCandidate?.content || batchId !== latestBatchId) return { ...node, metadata };
-        const videoSize = fitNodeSize(successfulCandidate.naturalWidth || fallbackSize.width, successfulCandidate.naturalHeight || fallbackSize.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-        return {
-            ...node,
-            width: videoSize.width,
-            height: videoSize.height,
-            position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
-            metadata: {
-                ...metadata,
-                content: successfulCandidate.content,
-                storageKey: successfulCandidate.storageKey,
-                naturalWidth: successfulCandidate.naturalWidth,
-                naturalHeight: successfulCandidate.naturalHeight,
-                bytes: successfulCandidate.bytes,
-                mimeType: successfulCandidate.mimeType,
-                status: NODE_STATUS_SUCCESS,
-                progress: 100,
-                errorDetails: undefined,
+        return applyCandidateDisplaySize(
+            {
+                ...node,
+                metadata: {
+                    ...metadata,
+                    content: successfulCandidate.content,
+                    storageKey: successfulCandidate.storageKey,
+                    naturalWidth: successfulCandidate.naturalWidth,
+                    naturalHeight: successfulCandidate.naturalHeight,
+                    size: successfulCandidate.size || node.metadata?.size,
+                    vquality: successfulCandidate.vquality || node.metadata?.vquality,
+                    bytes: successfulCandidate.bytes,
+                    mimeType: successfulCandidate.mimeType,
+                    status: NODE_STATUS_SUCCESS,
+                    progress: 100,
+                    errorDetails: undefined,
+                },
             },
-        };
+            successfulCandidate.displayWidth,
+            successfulCandidate.displayHeight,
+        );
     });
 }
 
@@ -5050,6 +5081,10 @@ function imageCandidateBatchesForNode(node: CanvasNodeData): CanvasImageCandidat
                     storageKey: metadata.storageKey,
                     naturalWidth: metadata.naturalWidth,
                     naturalHeight: metadata.naturalHeight,
+                    displayWidth: node.width,
+                    displayHeight: node.height,
+                    size: metadata.size,
+                    quality: metadata.quality,
                     bytes: metadata.bytes,
                     mimeType: metadata.mimeType,
                     status: NODE_STATUS_SUCCESS,
@@ -5113,20 +5148,26 @@ function updateImageCandidateTask(
             ?.items.find((candidate) => candidate.id === candidateId && candidate.status === NODE_STATUS_SUCCESS && Boolean(candidate.content));
         const metadata = { ...node.metadata, imageCandidateBatches };
         if (!successfulCandidate?.content || batchId !== latestBatchId) return { ...node, metadata };
-        return {
-            ...node,
-            metadata: {
-                ...metadata,
-                content: successfulCandidate.content,
-                storageKey: successfulCandidate.storageKey,
-                naturalWidth: successfulCandidate.naturalWidth,
-                naturalHeight: successfulCandidate.naturalHeight,
-                bytes: successfulCandidate.bytes,
-                mimeType: successfulCandidate.mimeType,
-                status: NODE_STATUS_SUCCESS,
-                errorDetails: undefined,
+        return applyCandidateDisplaySize(
+            {
+                ...node,
+                metadata: {
+                    ...metadata,
+                    content: successfulCandidate.content,
+                    storageKey: successfulCandidate.storageKey,
+                    naturalWidth: successfulCandidate.naturalWidth,
+                    naturalHeight: successfulCandidate.naturalHeight,
+                    size: successfulCandidate.size || node.metadata?.size,
+                    quality: successfulCandidate.quality || node.metadata?.quality,
+                    bytes: successfulCandidate.bytes,
+                    mimeType: successfulCandidate.mimeType,
+                    status: NODE_STATUS_SUCCESS,
+                    errorDetails: undefined,
+                },
             },
-        };
+            successfulCandidate.displayWidth,
+            successfulCandidate.displayHeight,
+        );
     });
 }
 
