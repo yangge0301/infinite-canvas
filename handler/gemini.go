@@ -39,7 +39,7 @@ func normalizeGeminiRequest(body []byte, contentType string, modelName string, e
 			parts = append(parts, geminiImagePart(image))
 		}
 		result := map[string]any{
-			"contents": []any{map[string]any{"role": "user", "parts": parts}},
+			"contents":         []any{map[string]any{"role": "user", "parts": parts}},
 			"generationConfig": map[string]any{"responseModalities": []string{"TEXT", "IMAGE"}},
 		}
 		if config := geminiImageConfig(payload, modelName); len(config) > 0 {
@@ -142,7 +142,7 @@ func geminiImageConfig(payload map[string]any, modelName string) map[string]any 
 	if len(image) == 0 {
 		return nil
 	}
-	return map[string]any{"responseModalities": []string{"TEXT", "IMAGE"}, "responseFormat": map[string]any{"image": image}}
+	return map[string]any{"imageConfig": image}
 }
 
 func geminiAspectRatio(value string) string {
@@ -178,6 +178,6 @@ func geminiAspectRatio(value string) string {
 var geminiSupportedAspectRatios = []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"}
 
 func geminiSupportsImageSize(modelName string) bool {
-	value := strings.ToLower(modelName)
-	return strings.Contains(value, "gemini-3") || strings.Contains(value, "3.1") || strings.Contains(value, "3-pro")
+	value := strings.NewReplacer(" ", "-", "_", "-").Replace(strings.ToLower(modelName))
+	return strings.Contains(value, "gemini-3") || strings.Contains(value, "3.1") || strings.Contains(value, "3-pro") || strings.Contains(value, "nano-banana")
 }

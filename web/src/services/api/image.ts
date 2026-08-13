@@ -500,7 +500,7 @@ function geminiImageConfig(config: AiConfig) {
         const imageSize = ({ low: "1K", medium: "2K", high: "4K", standard: "1K", hd: "2K" } as Record<string, string>)[quality];
         if (imageSize) image.imageSize = imageSize;
     }
-    return Object.keys(image).length ? { responseFormat: { image } } : {};
+    return Object.keys(image).length ? { imageConfig: image } : {};
 }
 
 function closestGeminiAspectRatio(value: string) {
@@ -515,8 +515,8 @@ function closestGeminiAspectRatio(value: string) {
 }
 
 function geminiSupportsImageSize(model: string) {
-    const value = model.toLowerCase();
-    return value.includes("gemini-3") || value.includes("3.1") || value.includes("3-pro");
+    const value = model.toLowerCase().replace(/[\s_]+/g, "-");
+    return value.includes("gemini-3") || value.includes("3.1") || value.includes("3-pro") || value.includes("nano-banana");
 }
 
 function parseGeminiImages(payload: GeminiPayload): GeneratedImage[] {

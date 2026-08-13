@@ -254,9 +254,12 @@ function isVideoModelName(model: string) {
 
 function isImageModelName(model: string) {
     const value = model.toLowerCase();
+    const normalized = value.replace(/[\s_]+/g, "-");
     return !isVideoModelName(model) && !isAudioModelName(model) && (
         value.includes("image") ||
         value.includes("nano-banana") ||
+        value.includes("nano banana") ||
+        normalized.includes("nano-banana") ||
         value.includes("seedream") ||
         value.includes("gpt-image") ||
         value.includes("dall-e") ||
@@ -487,15 +490,13 @@ export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelCha
 }
 
 export function channelIdForActiveModel(config: AiConfig) {
-    if (modelMatchesCapability(config.model, "image") && config.imageChannelId) return config.imageChannelId;
-    if (modelMatchesCapability(config.model, "video") && config.videoChannelId) return config.videoChannelId;
-    if (modelMatchesCapability(config.model, "audio") && config.audioChannelId) return config.audioChannelId;
-    if (modelMatchesCapability(config.model, "text") && config.textChannelId) return config.textChannelId;
-    if (config.activeChannelId) return config.activeChannelId;
-    if (config.model === config.videoModel) return config.videoChannelId;
-    if (config.model === config.textModel) return config.textChannelId;
-    if (config.model === config.audioModel) return config.audioChannelId;
-    return config.imageChannelId;
+    const channels = config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config);
+    const model = config.model.trim();
+    const channelHasModel = (channel: { id?: string; models?: string[] }, id: string) => channel.id === id && (channel.models?.length ? channel.models.includes(model) : true);
+    const firstValid = (...ids: Array<string | undefined>) => ids.find((id) => Boolean(id && channels.some((channel) => channelHasModel(channel, id)))) || "";
+    const byModel = channels.find((channel) => channel.models?.includes(model))?.id || "";
+    const byCapability = modelMatchesCapability(model, "image") || model === config.imageModel ? config.imageChannelId : modelMatchesCapability(model, "video") || model === config.videoModel ? config.videoChannelId : modelMatchesCapability(model, "audio") || model === config.audioModel ? config.audioChannelId : config.textChannelId;
+    return firstValid(byCapability, config.activeChannelId, config.imageChannelId, config.videoChannelId, config.textChannelId, config.audioChannelId) || byModel || (config.channelMode === "local" ? normalizeLocalChannels(config)[0]?.id || "" : "");
 }
 
 export function localChannelForActiveModel(config: AiConfig) {

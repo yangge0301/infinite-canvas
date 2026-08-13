@@ -185,10 +185,18 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	}
 	setting.ModelChannel.AvailableModels = filterEnabledModels(setting.ModelChannel.AvailableModels, enabledChannelModels(channels))
 	setting.ModelChannel.ModelCosts = syncModelCosts(setting.ModelChannel.ModelCosts, setting.ModelChannel.AvailableModels)
-	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "text" })
-	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "image" })
-	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "video" })
-	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "text" })
+	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.AvailableModels, func(modelName string) bool {
+		return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "text"
+	})
+	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.AvailableModels, func(modelName string) bool {
+		return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "image"
+	})
+	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.AvailableModels, func(modelName string) bool {
+		return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "video"
+	})
+	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, func(modelName string) bool {
+		return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "text"
+	})
 	return setting
 }
 
@@ -442,7 +450,8 @@ func isVideoModelName(modelName string) bool {
 
 func isImageModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return strings.Contains(name, "seedream") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image")
+	normalized := strings.NewReplacer(" ", "-", "_", "-").Replace(name)
+	return strings.Contains(name, "seedream") || strings.Contains(name, "nano banana") || strings.Contains(normalized, "nano-banana") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image")
 }
 
 func isTextModelName(modelName string) bool {
@@ -469,7 +478,7 @@ func modelType(modelName string) string {
 	if strings.Contains(name, "audio") || strings.Contains(name, "tts") || strings.Contains(name, "speech") || strings.Contains(name, "voice") || strings.Contains(name, "music") || strings.Contains(name, "sound") || strings.Contains(name, "elevenlabs") || strings.Contains(name, "suno") || strings.Contains(name, "lyrics") || strings.Contains(name, "vocal") || strings.Contains(name, "midi") || strings.Contains(name, "wav") {
 		return "audio"
 	}
-	if strings.Contains(name, "image") || strings.Contains(name, "nano-banana") || strings.Contains(name, "seedream") || strings.Contains(name, "dall-e") || strings.Contains(name, "dalle") || strings.Contains(name, "imagen") || strings.Contains(name, "gemini-2.5-flash") || strings.Contains(name, "gemini-3-pro") || strings.Contains(name, "gemini-3.1-flash") || strings.Contains(name, "flux") || strings.Contains(name, "kontext") || strings.Contains(name, "qwen/image") || strings.Contains(name, "ideogram") || strings.Contains(name, "recraft") || strings.Contains(name, "sdxl") || strings.Contains(name, "stable-diffusion") || strings.Contains(name, "midjourney") || strings.Contains(name, "topaz/image") || strings.Contains(name, "grok-imagine") {
+	if strings.Contains(name, "image") || strings.Contains(name, "nano-banana") || strings.Contains(name, "nano banana") || strings.Contains(strings.NewReplacer(" ", "-", "_", "-").Replace(name), "nano-banana") || strings.Contains(name, "seedream") || strings.Contains(name, "dall-e") || strings.Contains(name, "dalle") || strings.Contains(name, "imagen") || strings.Contains(name, "gemini-2.5-flash") || strings.Contains(name, "gemini-3-pro") || strings.Contains(name, "gemini-3.1-flash") || strings.Contains(name, "flux") || strings.Contains(name, "kontext") || strings.Contains(name, "qwen/image") || strings.Contains(name, "ideogram") || strings.Contains(name, "recraft") || strings.Contains(name, "sdxl") || strings.Contains(name, "stable-diffusion") || strings.Contains(name, "midjourney") || strings.Contains(name, "topaz/image") || strings.Contains(name, "grok-imagine") {
 		return "image"
 	}
 	return "text"
@@ -1162,15 +1171,15 @@ func publicChannelInfos(channels []model.ModelChannel) []model.PublicModelChanne
 			continue
 		}
 		result = append(result, model.PublicModelChannelInfo{
-			ID:      channel.ID,
+			ID:       channel.ID,
 			Protocol: channel.Protocol,
-			Name:    channel.Name,
-			BaseURL: channel.BaseURL,
-			Models:  append([]string{}, channel.Models...),
-			Weight:  channel.Weight,
-			Timeout: channel.Timeout,
-			Enabled: channel.Enabled,
-			Remark:  channel.Remark,
+			Name:     channel.Name,
+			BaseURL:  channel.BaseURL,
+			Models:   append([]string{}, channel.Models...),
+			Weight:   channel.Weight,
+			Timeout:  channel.Timeout,
+			Enabled:  channel.Enabled,
+			Remark:   channel.Remark,
 		})
 	}
 	return result

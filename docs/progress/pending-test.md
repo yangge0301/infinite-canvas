@@ -21,4 +21,6 @@ description: 当前版本已实现但仍需人工验证的变更项
 - [ ] 已有图片或视频内容的节点在设置面板切换比例时，节点展示外框立即切换至对应比例；后续再次生成和选择历史候选仍维持对应尺寸。
 - [ ] 管理后台模型渠道可新增 Gemini 与火山方舟协议：Gemini 默认地址为 `https://generativelanguage.googleapis.com`，可拉取模型、测试模型；方舟默认地址为 `https://ark.cn-beijing.volces.com/api/v3`，标准 OpenAI 兼容渠道可拉取模型、测试模型。
 - [ ] Gemini 渠道配置为图片或文本模型后，图片工作台与画布图片节点可完成文生图、参考图生图；画布文本节点可返回文本。Gemini 图片的比例与清晰度配置会映射到 Gemini 支持的参数。
+- [ ] Gemini 图片请求将画布的像素尺寸映射为 `generationConfig.imageConfig.aspectRatio`，将质量映射为 `generationConfig.imageConfig.imageSize`；Nano Banana 2 的高质量设置应传为 `4K`。
+- [ ] 画布图片节点选择名称含空格或下划线的 Nano Banana 模型时，应识别为图片模型；旧节点遗留的 `local-default` 等无效渠道 ID 会自动切换为后台中实际配置该模型的云端渠道，不再提示“指定模型渠道不可用”。
 - [ ] 火山方舟渠道配置为图片、文本、视频或音频模型后，画布按现有 OpenAI 兼容接口发起请求；图片参考图生成使用 JSON 图片字段。Gemini 视频和音频模型当前应提示渠道暂不支持。
