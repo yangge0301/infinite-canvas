@@ -26,6 +26,10 @@ export type CanvasNodeGenerationMode = CanvasGenerationMode;
 export type CanvasVideoReferenceKind = "image" | "video" | "audio";
 export type CanvasVideoReferenceSlot = "reference" | "firstFrame" | "lastFrame";
 
+function videoReferenceAccept(kind: CanvasVideoReferenceKind) {
+    return kind === "image" ? "image/*" : kind === "video" ? "video/*" : "audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav";
+}
+
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
@@ -189,8 +193,11 @@ function CanvasVideoInputModes({ node, options, theme, onModeChange, onUpload, o
     const audios = resources.filter((option) => option.kind === "audio");
     const selectUpload = (kind: CanvasVideoReferenceKind, slot: CanvasVideoReferenceSlot = "reference") => {
         if (!onUpload) return;
+        const input = uploadInputRef.current;
+        if (!input) return;
         setUploadTarget({ kind, slot });
-        uploadInputRef.current?.click();
+        input.accept = videoReferenceAccept(kind);
+        input.click();
     };
     const uploadFile = async (file?: File) => {
         if (!file || !uploadTarget || !onUpload) return;
@@ -213,27 +220,27 @@ function CanvasVideoInputModes({ node, options, theme, onModeChange, onUpload, o
                     return <button key={option.value} type="button" className="h-7 rounded-md border px-2 text-xs transition-colors" style={{ borderColor: selected ? theme.node.stroke : theme.toolbar.border, background: selected ? theme.node.fill : "transparent", color: selected ? theme.node.text : theme.node.muted }} onClick={() => onModeChange(option.value)}>{option.label}</button>;
                 })}
             </div>
-            {mode === "text-to-video" ? <DisabledVideoResources options={resources} theme={theme} /> : null}
+            {mode === "text-to-video" ? <DisabledVideoResources options={resources} theme={theme} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} /> : null}
             {mode === "image-to-video" ? <>
                 <VideoReferenceSection label="参考图片" theme={theme}><VideoReferenceTile option={imageReference} kind="image" theme={theme} onAdd={() => selectUpload("image")} onRemove={() => imageReference && onRemove?.(node.id, "reference", imageReference.nodeId)} /></VideoReferenceSection>
-                <DisabledVideoResources options={[...images.slice(1), ...videos, ...audios]} theme={theme} />
+                <DisabledVideoResources options={[...images.slice(1), ...videos, ...audios]} theme={theme} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} />
             </> : null}
             {mode === "first-last-frame" ? <>
                 <VideoReferenceSection label="首帧" theme={theme}><VideoReferenceTile option={selectedFirstFrame} kind="image" theme={theme} onAdd={() => selectUpload("image", "firstFrame")} onRemove={() => selectedFirstFrame && onRemove?.(node.id, "firstFrame", selectedFirstFrame.nodeId)} /></VideoReferenceSection>
                 <VideoReferenceSection label="尾帧" theme={theme}><VideoReferenceTile option={selectedLastFrame} kind="image" theme={theme} onAdd={() => selectUpload("image", "lastFrame")} onRemove={() => selectedLastFrame && onRemove?.(node.id, "lastFrame", selectedLastFrame.nodeId)} /></VideoReferenceSection>
-                <DisabledVideoResources options={[...images.filter((option) => option.nodeId !== selectedFirstFrame?.nodeId && option.nodeId !== selectedLastFrame?.nodeId), ...videos, ...audios]} theme={theme} />
+                <DisabledVideoResources options={[...images.filter((option) => option.nodeId !== selectedFirstFrame?.nodeId && option.nodeId !== selectedLastFrame?.nodeId), ...videos, ...audios]} theme={theme} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} />
             </> : null}
             {mode === "all-reference" ? <>
                 <VideoReferenceSection label="图片 · 最多 9 张" theme={theme}><VideoReferenceTiles options={images.slice(0, 9)} kind="image" limit={9} theme={theme} onAdd={() => selectUpload("image")} onRemove={(id) => onRemove?.(node.id, "reference", id)} /></VideoReferenceSection>
                 <VideoReferenceSection label="视频 · 最多 3 个" theme={theme}><VideoReferenceTiles options={videos.slice(0, 3)} kind="video" limit={3} theme={theme} onAdd={() => selectUpload("video")} onRemove={(id) => onRemove?.(node.id, "reference", id)} /></VideoReferenceSection>
                 <VideoReferenceSection label="音频 · 最多 3 个" theme={theme}><VideoReferenceTiles options={audios.slice(0, 3)} kind="audio" limit={3} theme={theme} onAdd={() => selectUpload("audio")} onRemove={(id) => onRemove?.(node.id, "reference", id)} /></VideoReferenceSection>
-                <DisabledVideoResources options={[...images.slice(9), ...videos.slice(3), ...audios.slice(3)]} theme={theme} />
+                <DisabledVideoResources options={[...images.slice(9), ...videos.slice(3), ...audios.slice(3)]} theme={theme} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} />
             </> : null}
             {mode === "video-continuation" ? <>
                 <VideoReferenceSection label="续写视频" theme={theme}><VideoReferenceTile option={continuationReference} kind="video" theme={theme} onAdd={() => selectUpload("video")} onRemove={() => continuationReference && onRemove?.(node.id, "reference", continuationReference.nodeId)} /></VideoReferenceSection>
-                <DisabledVideoResources options={[...images, ...videos.slice(1), ...audios]} theme={theme} />
+                <DisabledVideoResources options={[...images, ...videos.slice(1), ...audios]} theme={theme} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} />
             </> : null}
-            <input ref={uploadInputRef} className="hidden" type="file" accept={uploadTarget?.kind === "image" ? "image/*" : uploadTarget?.kind === "video" ? "video/*" : "audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"} onChange={(event) => { void uploadFile(event.target.files?.[0]); event.target.value = ""; }} />
+            <input ref={uploadInputRef} className="hidden" type="file" accept={uploadTarget ? videoReferenceAccept(uploadTarget.kind) : undefined} onChange={(event) => { void uploadFile(event.target.files?.[0]); event.target.value = ""; }} />
         </div>
     );
 }
@@ -253,8 +260,8 @@ function VideoReferenceTiles({ options, kind, limit, theme, onAdd, onRemove }: {
     return <>{options.map((option) => <VideoReferenceTile key={option.nodeId} option={option} kind={kind} theme={theme} onRemove={() => onRemove(option.nodeId)} />)}{options.length < limit ? <VideoReferenceTile kind={kind} theme={theme} onAdd={onAdd} /> : null}</>;
 }
 
-function DisabledVideoResources({ options, theme }: { options: CanvasVideoResourceOption[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    return options.length ? <VideoReferenceSection label="已连接素材" theme={theme}>{options.map((option) => <VideoReferenceTile key={option.nodeId} option={option} kind={option.kind as CanvasVideoReferenceKind} theme={theme} disabled />)}</VideoReferenceSection> : null;
+function DisabledVideoResources({ options, theme, onRemove }: { options: CanvasVideoResourceOption[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRemove?: (resourceNodeId: string) => void }) {
+    return options.length ? <VideoReferenceSection label="已连接素材" theme={theme}>{options.map((option) => <VideoReferenceTile key={option.nodeId} option={option} kind={option.kind as CanvasVideoReferenceKind} theme={theme} disabled onRemove={() => onRemove?.(option.nodeId)} />)}</VideoReferenceSection> : null;
 }
 
 function VideoReferenceTile({ option, kind, label, theme, onAdd, onRemove, disabled = false }: { option?: CanvasVideoResourceOption; kind: CanvasVideoReferenceKind; label?: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onAdd?: () => void; onRemove?: () => void; disabled?: boolean }) {
@@ -262,7 +269,7 @@ function VideoReferenceTile({ option, kind, label, theme, onAdd, onRemove, disab
     if (!option) return <button type="button" title={label ? `上传${label}` : `上传${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}`} aria-label={label ? `上传${label}` : "上传参考素材"} className="flex size-12 shrink-0 flex-col items-center justify-center rounded-md border border-dashed transition-colors" style={{ borderColor: theme.node.stroke, color: theme.node.muted }} onClick={onAdd}><Plus className="size-4" /><Icon className="mt-0.5 size-3" /></button>;
     return <div className={`group relative size-12 shrink-0 overflow-hidden rounded-md border ${disabled ? "cursor-not-allowed opacity-35 grayscale" : ""}`} style={{ borderColor: theme.node.stroke, background: theme.node.fill }} title={disabled ? `${option.label} 不适用于当前模式` : option.label} aria-disabled={disabled}>
         {kind === "image" && option.previewUrl ? <img src={option.previewUrl} alt={option.label} className="size-full object-cover" /> : <div className="flex size-full flex-col items-center justify-center gap-0.5" style={{ color: theme.node.muted }}><Icon className="size-4" /><span className="max-w-full truncate px-1 text-[10px]">{label || option.label}</span></div>}
-        {!disabled ? <button type="button" title="移除参考素材" aria-label="移除参考素材" className="absolute right-0.5 top-0.5 hidden size-4 items-center justify-center rounded-sm group-hover:flex" style={{ background: theme.toolbar.panel, color: theme.node.text }} onClick={onRemove}><X className="size-3" /></button> : null}
+        {onRemove ? <button type="button" title="移除参考素材" aria-label="移除参考素材" className="absolute right-0.5 top-0.5 hidden size-4 cursor-pointer items-center justify-center rounded-sm group-hover:flex" style={{ background: theme.toolbar.panel, color: theme.node.text }} onClick={onRemove}><X className="size-3" /></button> : null}
     </div>;
 }
 

@@ -1338,18 +1338,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const handleCanvasMouseDown = useCallback(
         (event: ReactPointerEvent<HTMLDivElement>) => {
-            setContextMenu(null);
-            setNodeCreatePosition(null);
-            if (pendingConnectionCreateRef.current) cancelPendingConnectionCreate();
             if (event.button !== 0) return;
-
-            if (!event.ctrlKey && !event.metaKey) {
-                setSelectionBox(null);
-                setSelectedNodeIds(new Set());
-                setSelectedConnectionId(null);
-                return;
-            }
-
+            const initialSelectedNodeIds = event.shiftKey ? Array.from(selectedNodeIdsRef.current) : [];
+            deselectCanvas();
             const world = screenToCanvas(event.clientX, event.clientY);
             const nextSelectionBox = {
                 startWorldX: world.x,
@@ -1357,17 +1348,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 currentWorldX: world.x,
                 currentWorldY: world.y,
                 additive: event.shiftKey,
-                initialSelectedNodeIds: event.shiftKey ? Array.from(selectedNodeIdsRef.current) : [],
+                initialSelectedNodeIds,
             };
             selectionBoxRef.current = nextSelectionBox;
             setSelectionBox(nextSelectionBox);
-            if (!event.shiftKey) {
-                setSelectedNodeIds(new Set());
-            }
-
-            setSelectedConnectionId(null);
+            if (event.shiftKey) setSelectedNodeIds(new Set(initialSelectedNodeIds));
         },
-        [cancelPendingConnectionCreate, screenToCanvas],
+        [deselectCanvas, screenToCanvas],
     );
 
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string) => {
@@ -1788,8 +1775,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 metadata: {
                     ...node.metadata,
                     videoReferenceNodeIds: (node.metadata?.videoReferenceNodeIds || []).filter((id) => id !== resourceNodeId),
-                    ...(slot === "firstFrame" ? { firstFrameNodeId: undefined } : {}),
-                    ...(slot === "lastFrame" ? { lastFrameNodeId: undefined } : {}),
+                    ...(slot === "firstFrame" || node.metadata?.firstFrameNodeId === resourceNodeId ? { firstFrameNodeId: undefined } : {}),
+                    ...(slot === "lastFrame" || node.metadata?.lastFrameNodeId === resourceNodeId ? { lastFrameNodeId: undefined } : {}),
                 },
             };
         }));
