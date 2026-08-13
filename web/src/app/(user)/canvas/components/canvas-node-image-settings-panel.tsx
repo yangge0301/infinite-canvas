@@ -7,28 +7,28 @@ import { firstAllowed, imageQualityOptions, imageRatioOptions, imageResolutionOp
 import type { AiConfig } from "@/stores/use-config-store";
 
 const ratioOptions = [
+    { value: "21:9", width: 21, height: 9 },
+    { value: "16:9", width: 16, height: 9 },
+    { value: "9:16", width: 9, height: 16 },
     { value: "1:1", width: 1, height: 1 },
     { value: "2:1", width: 2, height: 1 },
     { value: "3:2", width: 3, height: 2 },
     { value: "4:3", width: 4, height: 3 },
     { value: "3:4", width: 3, height: 4 },
-    { value: "16:9", width: 16, height: 9 },
-    { value: "9:16", width: 9, height: 16 },
-    { value: "21:9", width: 21, height: 9 },
     { value: "2:3", width: 2, height: 3 },
     { value: "9:21", width: 9, height: 21 },
 ];
 
 const resolutionOptions = [
-    { value: 1024, label: "1K" },
-    { value: 2048, label: "2K" },
-    { value: 3840, label: "4K" },
+    { value: 1024, capabilityValue: "1k", label: "1K" },
+    { value: 2048, capabilityValue: "2k", label: "2K" },
+    { value: 3840, capabilityValue: "4k", label: "4K" },
 ];
 
 const qualityOptions = [
-    { value: "low", label: "普通质量" },
-    { value: "medium", label: "高质量" },
     { value: "high", label: "超高质量" },
+    { value: "medium", label: "高质量" },
+    { value: "low", label: "普通质量" },
 ];
 
 type CanvasNodeImageSettingsPanelProps = {
@@ -47,7 +47,7 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
     const resolutions = capability.resolutions;
     const qualities = capability.qualities;
     const selected = resolveSizeSelection(config.size || ratios[0], ratios, resolutions);
-    const quality = firstAllowed(config.quality === "auto" ? "medium" : config.quality || "medium", qualities, "medium");
+    const quality = firstAllowed(config.quality === "auto" ? "high" : config.quality || "high", qualities, "high");
     const maxCount = capability.maxCount || 4;
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const selectRatio = (ratio: (typeof ratioOptions)[number]) => onConfigChange("size", sizeForRatio(ratio, selected.resolution));
@@ -78,7 +78,7 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
             {showSize ? (
                 <section className="space-y-2.5">
                     <SectionTitle>清晰度</SectionTitle>
-                    <SegmentedOptions options={resolutionOptions.filter((item) => resolutions.includes(`${item.value / 1024}k`))} selected={selected.resolution} theme={theme} onSelect={(item) => selectResolution(item.value)} />
+                    <SegmentedOptions options={resolutionOptions.filter((item) => resolutions.includes(item.capabilityValue))} selected={selected.resolution} theme={theme} onSelect={(item) => selectResolution(item.value)} />
                 </section>
             ) : null}
 
@@ -145,13 +145,14 @@ function resolveSizeSelection(size: string, allowedRatios: string[], allowedReso
     const [width, height] = size.split("x").map(Number);
     if (!width || !height) {
         const ratio = ratioOptions.find((item) => item.value === size && allowedRatios.includes(item.value)) || ratioOptions.find((item) => allowedRatios.includes(item.value)) || ratioOptions[0];
-        const resolution = allowedResolutions.includes("2k") ? 2048 : allowedResolutions.includes("1k") ? 1024 : 3840;
+        const resolution = resolutionOptions.find((item) => allowedResolutions.includes(item.capabilityValue))?.value || 1024;
         return { ratio, resolution };
     }
     const allowed = ratioOptions.filter((item) => allowedRatios.includes(item.value));
     const ratio = allowed.reduce((closest, item) => (Math.abs(width / height - item.width / item.height) < Math.abs(width / height - closest.width / closest.height) ? item : closest), allowed[0] || ratioOptions[0]);
     const resolution = nearestResolution(Math.max(width, height));
-    return { ratio, resolution: allowedResolutions.includes(`${resolution / 1024}k`) ? resolution : allowedResolutions.includes("2k") ? 2048 : allowedResolutions.includes("1k") ? 1024 : 3840 };
+    const selectedResolution = resolutionOptions.find((item) => item.value === resolution && allowedResolutions.includes(item.capabilityValue))?.value;
+    return { ratio, resolution: selectedResolution || resolutionOptions.find((item) => allowedResolutions.includes(item.capabilityValue))?.value || 1024 };
 }
 
 function nearestResolution(value: number) {

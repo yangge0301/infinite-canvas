@@ -550,7 +550,7 @@ export default function AdminSettingsPage() {
                                                     title: "质量",
                                                     dataIndex: "qualities",
                                                     width: 230,
-                                                    render: (_, item: AdminModelCost) => item.type === "image" ? <Select mode="multiple" maxTagCount="responsive" value={item.qualities} options={[{ value: "low", label: "普通质量" }, { value: "medium", label: "高质量" }, { value: "high", label: "超高质量" }]} onChange={(qualities) => patchModelCost(form, setModelCosts, item, { qualities })} /> : "",
+                                                    render: (_, item: AdminModelCost) => item.type === "image" ? <Select mode="multiple" maxTagCount="responsive" value={item.qualities} options={[{ value: "high", label: "超高质量" }, { value: "medium", label: "高质量" }, { value: "low", label: "普通质量" }]} onChange={(qualities) => patchModelCost(form, setModelCosts, item, { qualities })} /> : "",
                                                 },
                                                 {
                                                     title: "最大个数",

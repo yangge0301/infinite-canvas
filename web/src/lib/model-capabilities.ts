@@ -20,9 +20,9 @@ export type ModelCapabilityConfig = {
     creditType: "request" | "second";
 };
 
-export const imageRatioOptions = ["1:1", "2:1", "3:2", "4:3", "3:4", "16:9", "9:16", "21:9", "2:3", "9:21"];
+export const imageRatioOptions = ["21:9", "16:9", "9:16", "1:1", "2:1", "3:2", "4:3", "3:4", "2:3", "9:21"];
 export const imageResolutionOptions = ["1k", "2k", "4k"];
-export const imageQualityOptions = ["low", "medium", "high"];
+export const imageQualityOptions = ["high", "medium", "low"];
 export const videoRatioOptions = ["21:9", "16:9", "9:16", "4:3", "3:4", "1:1"];
 export const videoQualityOptions = ["480p", "720p", "768p", "1080p", "2k", "4k"];
 export const videoDurationOptions = ["5", "10", "15", "20", "25", "30"];
@@ -65,7 +65,27 @@ export function modelCapabilityFor(configs: ModelCapabilityConfig[] | undefined,
 }
 
 export function configuredModelCapability(configs: ModelCapabilityConfig[] | undefined, model: string) {
-    return configs?.find((item) => item.model === model);
+    const configured = configs?.find((item) => item.model === model);
+    if (!configured) return undefined;
+    const defaults = defaultModelCapability(configured.model, configured.type || inferModelType(configured.model));
+    return {
+        ...defaults,
+        ...configured,
+        ratios: capabilityList(configured.ratios, defaults.ratios),
+        resolutions: capabilityList(configured.resolutions, defaults.resolutions),
+        qualities: capabilityList(configured.qualities, defaults.qualities),
+        durationOptions: capabilityList(configured.durationOptions, defaults.durationOptions),
+        videoQualities: capabilityList(configured.videoQualities, defaults.videoQualities),
+        audioVoices: capabilityList(configured.audioVoices, defaults.audioVoices),
+        audioFormats: capabilityList(configured.audioFormats, defaults.audioFormats),
+        audioSpeeds: capabilityList(configured.audioSpeeds, defaults.audioSpeeds),
+    };
+}
+
+function capabilityList(value: unknown, fallback: string[]) {
+    if (!Array.isArray(value)) return [...fallback];
+    const allowed = new Set(value.filter((item): item is string => typeof item === "string"));
+    return fallback.filter((item) => allowed.has(item));
 }
 
 export function modelTypeFor(configs: ModelCapabilityConfig[] | undefined, model: string) {

@@ -5465,7 +5465,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         videoChannelId,
         textChannelId,
         audioChannelId,
-        quality: firstAllowed(node?.metadata?.quality || config.quality || defaultConfig.quality, capability.qualities, capability.qualities[0] || defaultConfig.quality),
+        quality: firstAllowed(node?.metadata?.quality || config.quality || defaultConfig.quality, capability.qualities, capability.qualities.includes("high") ? "high" : capability.qualities[0] || defaultConfig.quality),
         size,
         videoSeconds,
         vquality: firstAllowed(node?.metadata?.vquality || config.vquality || defaultConfig.vquality, capability.videoQualities, capability.videoQualities[0] || defaultConfig.vquality),
@@ -5483,7 +5483,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         mimoTtsVoice: node?.metadata?.mimoTtsVoice || config.mimoTtsVoice || defaultConfig.mimoTtsVoice,
         mimoTtsFormat: node?.metadata?.mimoTtsFormat || config.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node?.metadata?.mimoVoiceDesignPrompt || config.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
-        count: String(maxAllowedCount(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count, capability)),
+        count: String(maxAllowedCount(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || "1" : config.count) || defaultConfig.count, capability)),
     };
 }
 

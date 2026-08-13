@@ -166,7 +166,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         videoChannelId,
         textChannelId,
         audioChannelId,
-        quality: firstAllowed(node.metadata?.quality || globalConfig.quality || defaultConfig.quality, capability.qualities, capability.qualities[0] || defaultConfig.quality),
+        quality: firstAllowed(node.metadata?.quality || globalConfig.quality || defaultConfig.quality, capability.qualities, capability.qualities.includes("high") ? "high" : capability.qualities[0] || defaultConfig.quality),
         size: mode === "video" ? videoSizeForCapability(rawSize, capability) : mode === "image" ? imageSizeForCapability(rawSize, capability) : rawSize,
         videoSeconds: capability.fixedDuration ? firstAllowed(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds, capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds) || 1))),
         vquality: firstAllowed(node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality, capability.videoQualities, capability.videoQualities[0] || defaultConfig.vquality),
@@ -184,7 +184,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         mimoTtsVoice: node.metadata?.mimoTtsVoice || globalConfig.mimoTtsVoice || defaultConfig.mimoTtsVoice,
         mimoTtsFormat: node.metadata?.mimoTtsFormat || globalConfig.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node.metadata?.mimoVoiceDesignPrompt || globalConfig.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
-        count: String(maxAllowedCount(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count, capability)),
+        count: String(maxAllowedCount(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || "1" : globalConfig.count) || defaultConfig.count, capability)),
     };
 }
 
