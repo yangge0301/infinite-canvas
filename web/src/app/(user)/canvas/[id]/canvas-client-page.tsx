@@ -1102,7 +1102,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setHoveredNodeId(null);
         setToolbarNodeId(null);
         setDialogNodeId(null);
+        setNodeImageSettingsOpen(false);
         setEditingNodeId(null);
+        setNodeCreatePosition(null);
+        setInfoNodeId(null);
+        setCropNodeId(null);
+        setMaskEditNodeId(null);
+        setSplitNodeId(null);
+        setUpscaleNodeId(null);
+        setSuperResolveNodeId(null);
+        setAngleNodeId(null);
+        setPreviewNodeId(null);
         setCandidatePickerNodeId(null);
         setVideoCandidatePickerNodeId(null);
     }, [cancelPendingConnectionCreate]);
@@ -1363,9 +1373,21 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string) => {
         event.stopPropagation();
         setContextMenu(null);
+        setNodeCreatePosition(null);
         setHoveredNodeId(null);
         setToolbarNodeId(null);
         setSelectedConnectionId(null);
+        setNodeImageSettingsOpen(false);
+        setInfoNodeId(null);
+        setCropNodeId(null);
+        setMaskEditNodeId(null);
+        setSplitNodeId(null);
+        setUpscaleNodeId(null);
+        setSuperResolveNodeId(null);
+        setAngleNodeId(null);
+        setPreviewNodeId(null);
+        setCandidatePickerNodeId(null);
+        setVideoCandidatePickerNodeId(null);
         if (nodesRef.current.find((node) => node.id === nodeId)?.type === CanvasNodeType.Group) setDialogNodeId(null);
 
         const currentSelected = selectedNodeIdsRef.current;

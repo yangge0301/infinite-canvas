@@ -122,6 +122,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
 
         if (event.button === 0 && !isSpacePressed && isBackgroundClick) {
             event.preventDefault();
+            onCanvasDeselect?.();
         }
     };
 
