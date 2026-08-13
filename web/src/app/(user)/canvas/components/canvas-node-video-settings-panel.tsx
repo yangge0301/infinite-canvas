@@ -49,7 +49,7 @@ export function CanvasNodeVideoSettingsPanel({ config, metadata, theme, audioSup
     const ratio = firstAllowed(normalizeSeedanceRatio(config.size), capability.ratios, capability.ratios[0] || "16:9");
     const resolution = firstAllowed(normalizeResolution(config.vquality), capability.videoQualities, capability.videoQualities[0] || "720p");
     const audioEnabled = capability.videoGenerateAudio && config.videoGenerateAudio === "true";
-    const bitrate = metadata?.videoBitrate === "high" ? "high" : "standard";
+    const bitrate = metadata?.videoBitrate || "high";
 
     return (
         <div className="space-y-5" style={{ color: theme.node.text }}>

@@ -5467,9 +5467,13 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     const audioChannelId = mode === "audio" ? channelId || config.audioChannelId : config.audioChannelId;
     const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || config.activeChannelId : config.activeChannelId;
     const capability = modelCapabilityFor(modelCosts, model);
-    const rawSize = node?.metadata?.size || (mode === "video" ? config.videoSize || defaultConfig.videoSize : config.size || defaultConfig.size);
+    const preferredRatio = firstAllowed("21:9", capability.ratios, capability.ratios[0] || "21:9");
+    const preferredResolution = firstAllowed("2k", capability.resolutions, capability.resolutions[0] || "1k");
+    const preferredVideoRatio = firstAllowed("21:9", capability.ratios, capability.ratios[0] || "16:9");
+    const preferredVideoQuality = firstAllowed("720p", capability.videoQualities, capability.videoQualities[0] || "720p");
+    const rawSize = node?.metadata?.size || (mode === "video" ? videoSizeForCapability(preferredVideoRatio, { ...capability, videoQualities: [preferredVideoQuality] }) : mode === "image" ? imageSizeForCapability(`${preferredRatio}-${preferredResolution}`, capability) : config.size || defaultConfig.size);
     const size = isPanoramaNodeType(node?.type) ? PANORAMA_IMAGE_SIZE : mode === "video" ? videoSizeForCapability(rawSize, capability) : mode === "image" ? imageSizeForCapability(rawSize, capability) : rawSize;
-    const videoSeconds = capability.fixedDuration ? firstAllowed(node?.metadata?.seconds || config.videoSeconds, capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node?.metadata?.seconds || config.videoSeconds) || 1)));
+    const videoSeconds = capability.fixedDuration ? firstAllowed(node?.metadata?.seconds || "5", capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node?.metadata?.seconds || "5") || 1)));
     return {
         ...config,
         model,
@@ -5478,10 +5482,10 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         videoChannelId,
         textChannelId,
         audioChannelId,
-        quality: firstAllowed(node?.metadata?.quality || config.quality || defaultConfig.quality, capability.qualities, capability.qualities.includes("high") ? "high" : capability.qualities[0] || defaultConfig.quality),
+        quality: firstAllowed(node?.metadata?.quality || "medium", capability.qualities, capability.qualities[0] || "medium"),
         size,
         videoSeconds,
-        vquality: firstAllowed(node?.metadata?.vquality || config.vquality || defaultConfig.vquality, capability.videoQualities, capability.videoQualities[0] || defaultConfig.vquality),
+        vquality: firstAllowed(node?.metadata?.vquality || "720p", capability.videoQualities, capability.videoQualities[0] || "720p"),
         videoMode: node?.metadata?.mode || config.videoMode || defaultConfig.videoMode,
         videoNegativePrompt: node?.metadata?.negativePrompt || config.videoNegativePrompt || defaultConfig.videoNegativePrompt,
         videoMultiShot: node?.metadata?.multiShot || config.videoMultiShot || defaultConfig.videoMultiShot,
@@ -5496,7 +5500,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         mimoTtsVoice: node?.metadata?.mimoTtsVoice || config.mimoTtsVoice || defaultConfig.mimoTtsVoice,
         mimoTtsFormat: node?.metadata?.mimoTtsFormat || config.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node?.metadata?.mimoVoiceDesignPrompt || config.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
-        count: String(maxAllowedCount(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || "1" : config.count) || defaultConfig.count, capability)),
+        count: String(maxAllowedCount(node?.metadata?.count || (mode === "image" ? "1" : config.count) || defaultConfig.count, capability)),
     };
 }
 

@@ -172,7 +172,11 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const audioChannelId = mode === "audio" ? channelId || globalConfig.audioChannelId : globalConfig.audioChannelId;
     const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || globalConfig.activeChannelId : globalConfig.activeChannelId;
     const capability = modelCapabilityFor(modelCosts, model);
-    const rawSize = node.metadata?.size || (mode === "video" ? globalConfig.videoSize || defaultConfig.videoSize : globalConfig.size || defaultConfig.size);
+    const preferredRatio = firstAllowed("21:9", capability.ratios, capability.ratios[0] || "21:9");
+    const preferredResolution = firstAllowed("2k", capability.resolutions, capability.resolutions[0] || "1k");
+    const preferredVideoRatio = firstAllowed("21:9", capability.ratios, capability.ratios[0] || "16:9");
+    const preferredVideoQuality = firstAllowed("720p", capability.videoQualities, capability.videoQualities[0] || "720p");
+    const rawSize = node.metadata?.size || (mode === "video" ? videoSizeForCapability(preferredVideoRatio, { ...capability, videoQualities: [preferredVideoQuality] }) : mode === "image" ? imageSizeForCapability(`${preferredRatio}-${preferredResolution}`, capability) : globalConfig.size || defaultConfig.size);
     return {
         ...globalConfig,
         model,
@@ -181,10 +185,10 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         videoChannelId,
         textChannelId,
         audioChannelId,
-        quality: firstAllowed(node.metadata?.quality || globalConfig.quality || defaultConfig.quality, capability.qualities, capability.qualities.includes("high") ? "high" : capability.qualities[0] || defaultConfig.quality),
+        quality: firstAllowed(node.metadata?.quality || "medium", capability.qualities, capability.qualities[0] || "medium"),
         size: isPanoramaNodeType(node.type) ? PANORAMA_IMAGE_SIZE : mode === "video" ? videoSizeForCapability(rawSize, capability) : mode === "image" ? imageSizeForCapability(rawSize, capability) : rawSize,
-        videoSeconds: capability.fixedDuration ? firstAllowed(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds, capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds) || 1))),
-        vquality: firstAllowed(node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality, capability.videoQualities, capability.videoQualities[0] || defaultConfig.vquality),
+        videoSeconds: capability.fixedDuration ? firstAllowed(node.metadata?.seconds || "5", capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node.metadata?.seconds || "5") || 1))),
+        vquality: firstAllowed(node.metadata?.vquality || "720p", capability.videoQualities, capability.videoQualities[0] || "720p"),
         videoMode: node.metadata?.mode || globalConfig.videoMode || defaultConfig.videoMode,
         videoNegativePrompt: node.metadata?.negativePrompt || globalConfig.videoNegativePrompt || defaultConfig.videoNegativePrompt,
         videoMultiShot: node.metadata?.multiShot || globalConfig.videoMultiShot || defaultConfig.videoMultiShot,
@@ -199,7 +203,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         mimoTtsVoice: node.metadata?.mimoTtsVoice || globalConfig.mimoTtsVoice || defaultConfig.mimoTtsVoice,
         mimoTtsFormat: node.metadata?.mimoTtsFormat || globalConfig.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node.metadata?.mimoVoiceDesignPrompt || globalConfig.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
-        count: String(maxAllowedCount(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || "1" : globalConfig.count) || defaultConfig.count, capability)),
+        count: String(maxAllowedCount(node.metadata?.count || (mode === "image" ? "1" : globalConfig.count) || defaultConfig.count, capability)),
     };
 }
 
