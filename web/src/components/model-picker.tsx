@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
@@ -22,6 +22,7 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, channelId, capability, onChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
+    const autoCorrectedChannelRef = useRef("");
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const channelOptions = useMemo(() => {
         const channels =
@@ -41,7 +42,15 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
     const currentValue = current && currentOption ? currentOption.key : "";
 
     useEffect(() => {
-        if (value && currentOption?.channelId && channelId !== currentOption.channelId) onChange(value, currentOption.channelId);
+        const targetChannelId = currentOption?.channelId;
+        if (!value || !targetChannelId || channelId === targetChannelId) {
+            autoCorrectedChannelRef.current = "";
+            return;
+        }
+        const correctionKey = `${value}\u0000${channelId || ""}\u0000${targetChannelId}`;
+        if (autoCorrectedChannelRef.current === correctionKey) return;
+        autoCorrectedChannelRef.current = correctionKey;
+        onChange(value, targetChannelId);
     }, [channelId, currentOption?.channelId, onChange, value]);
 
     useEffect(() => {

@@ -2103,7 +2103,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+        setNodes((prev) => {
+            let changed = false;
+            const next = prev.map((node) => {
+                if (node.id !== nodeId) return node;
+                const updated = applyNodeConfigPatch(node, patch);
+                changed ||= updated !== node;
+                return updated;
+            });
+            return changed ? next : prev;
+        });
     }, []);
 
     const handleDirectorProjectChange = useCallback(
@@ -5000,7 +5009,10 @@ function applyCandidateDisplaySize(node: CanvasNodeData, width?: number, height?
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
     const safePatch = patch || {};
     const isPanorama = isPanoramaNodeType(node.type);
-    const next = { ...node, metadata: { ...node.metadata, ...safePatch, ...(isPanorama ? { size: PANORAMA_IMAGE_SIZE } : {}) } };
+    const effectivePatch = isPanorama ? { ...safePatch, size: PANORAMA_IMAGE_SIZE } : safePatch;
+    const metadata = node.metadata as Record<string, unknown> | undefined;
+    if (Object.entries(effectivePatch).every(([key, value]) => Object.is(metadata?.[key], value))) return node;
+    const next = { ...node, metadata: { ...node.metadata, ...effectivePatch } };
     const spec = isPanorama ? NODE_DEFAULT_SIZE[CanvasNodeType.Panorama] : node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     // 比例是节点的展示属性：即使已有媒体内容，切换比例也应立即同步画布外框。
     const size = !isPanorama && typeof safePatch.size === "string" ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
