@@ -422,6 +422,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
+    const committedViewportRef = useRef(viewport);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
@@ -698,10 +699,19 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         connectionsRef.current = connections;
         selectedNodeIdsRef.current = selectedNodeIds;
         viewportRef.current = viewport;
+        committedViewportRef.current = viewport;
         connectingParamsRef.current = connectingParams;
         connectionTargetNodeIdRef.current = connectionTargetNodeId;
         pendingConnectionCreateRef.current = pendingConnectionCreate;
     }, [nodes, connections, selectedNodeIds, viewport, connectingParams, connectionTargetNodeId, pendingConnectionCreate]);
+
+    const handleViewportChange = useCallback((next: ViewportTransform) => {
+        const current = committedViewportRef.current;
+        if (current.x === next.x && current.y === next.y && current.k === next.k) return;
+        committedViewportRef.current = next;
+        setViewport(next);
+        setContextMenu((value) => (value ? null : value));
+    }, []);
 
     useLayoutEffect(() => {
         selectionBoxRef.current = selectionBox;
@@ -4043,10 +4053,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     containerRef={containerRef}
                     viewport={viewport}
                     backgroundMode={backgroundMode}
-                    onViewportChange={(next) => {
-                        setViewport(next);
-                        setContextMenu(null);
-                    }}
+                    onViewportChange={handleViewportChange}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
                     onCanvasDoubleClick={openCanvasCreateMenu}

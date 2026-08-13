@@ -11,8 +11,7 @@ const canvasControlSelector = "[data-canvas-no-zoom],.ant-modal,.ant-popover,.an
 function isCanvasControl(target: EventTarget | null) {
     if (!(target instanceof Element)) return false;
     if (target.closest(".ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return true;
-    const video = target.closest("video");
-    if (video && video.closest("[data-node-id]")) return false;
+    if (target.closest("[data-node-id]")) return false;
     return Boolean(target.closest(canvasControlSelector));
 }
 
@@ -45,6 +44,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     const onCanvasDeselectRef = useRef(onCanvasDeselect);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
+    const wheelFrameRef = useRef<number | null>(null);
+    const nextWheelViewportRef = useRef<ViewportTransform | null>(null);
     const gestureScaleRef = useRef(1);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
 
@@ -57,6 +58,17 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         onViewportChangeRef.current = onViewportChange;
         onCanvasDeselectRef.current = onCanvasDeselect;
     }, [onCanvasDeselect, onViewportChange]);
+
+    const scheduleViewportChange = useCallback((nextViewport: ViewportTransform) => {
+        scaleRef.current = nextViewport.k;
+        viewportRef.current = nextViewport;
+        nextWheelViewportRef.current = nextViewport;
+        if (wheelFrameRef.current) return;
+        wheelFrameRef.current = requestAnimationFrame(() => {
+            wheelFrameRef.current = null;
+            if (nextWheelViewportRef.current) onViewportChangeRef.current(nextWheelViewportRef.current);
+        });
+    }, []);
 
     const zoomAtPoint = useCallback((factor: number, clientX: number, clientY: number) => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -74,14 +86,13 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             k: newScale,
         };
 
-        scaleRef.current = newScale;
-        viewportRef.current = nextViewport;
-        onViewportChangeRef.current(nextViewport);
-    }, [containerRef]);
+        scheduleViewportChange(nextViewport);
+    }, [containerRef, scheduleViewportChange]);
 
     useEffect(
         () => () => {
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
+            if (wheelFrameRef.current) cancelAnimationFrame(wheelFrameRef.current);
         },
         [],
     );
@@ -193,17 +204,23 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             if (!event.ctrlKey && !event.metaKey) {
                 const currentViewport = viewportRef.current;
                 const nextViewport = { x: currentViewport.x - event.deltaX, y: currentViewport.y - event.deltaY, k: currentViewport.k };
-                viewportRef.current = nextViewport;
-                onViewportChangeRef.current(nextViewport);
+                scheduleViewportChange(nextViewport);
                 return;
             }
 
             // macOS trackpad pinch is delivered as a ctrl/meta wheel gesture.
-            zoomAtPoint(Math.pow(1.45, -event.deltaY / 100), event.clientX, event.clientY);
+            const rect = container.getBoundingClientRect();
+            const currentViewport = viewportRef.current;
+            const newScale = Math.min(Math.max(currentViewport.k * Math.pow(1.45, -event.deltaY / 100), 0.05), 5);
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            const worldX = (mouseX - currentViewport.x) / currentViewport.k;
+            const worldY = (mouseY - currentViewport.y) / currentViewport.k;
+            scheduleViewportChange({ x: mouseX - worldX * newScale, y: mouseY - worldY * newScale, k: newScale });
         };
         container.addEventListener("wheel", handleWheel, { passive: false, capture: true });
         return () => container.removeEventListener("wheel", handleWheel, { capture: true });
-    }, [containerRef, zoomAtPoint]);
+    }, [containerRef, scheduleViewportChange]);
 
     useEffect(() => {
         const container = containerRef.current;

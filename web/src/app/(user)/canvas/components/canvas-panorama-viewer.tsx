@@ -114,7 +114,7 @@ function PanoramaSurface({ src, alt, proxyGeneratedPanorama, viewerEntry }: Pano
                 container,
                 panorama: panoramaSrc,
                 navbar: false,
-                mousewheel: true,
+                mousewheel: false,
                 mousemove: true,
                 touchmoveTwoFingers: false,
                 moveInertia: false,
