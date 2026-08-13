@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
 import { fetchAdminSettings, fetchChannelModels, measureAdminStorageProvider, saveAdminSettings, testChannelModel, type AdminModelChannel, type AdminModelCost, type AdminSettings, type AdminStorageProvider } from "@/services/api/admin";
+import { audioFormatOptions, audioSpeedOptions, audioVoiceOptions, defaultModelCapability, imageRatioOptions, imageResolutionOptions, type ModelCapabilityConfig, type ModelType, videoDurationOptions, videoQualityOptions, videoRatioOptions } from "@/lib/model-capabilities";
 import { useUserStore } from "@/stores/use-user-store";
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
@@ -517,21 +518,112 @@ export default function AdminSettingsPage() {
                                             rowKey="model"
                                             pagination={false}
                                             size="small"
-                                            dataSource={publicModels.map((model) => ({ model, credits: modelCostCredits(modelCosts, model) }))}
+                                            scroll={{ x: 2780 }}
+                                            dataSource={publicModels.map((model) => modelCosts.find((item) => item.model === model) || defaultModelCapability(model))}
                                             columns={[
-                                                { title: "模型", dataIndex: "model" },
+                                                { title: "模型", dataIndex: "model", width: 180, fixed: "left" },
                                                 {
-                                                    title: "每次调用扣除",
-                                                    dataIndex: "credits",
+                                                    title: "展示名称",
+                                                    dataIndex: "displayName",
+                                                    width: 160,
+                                                    render: (_, item: AdminModelCost) => <Input value={item.displayName} placeholder={item.model} onChange={(event) => patchModelCost(form, setModelCosts, item, { displayName: event.target.value })} />,
+                                                },
+                                                {
+                                                    title: "模型类型",
+                                                    dataIndex: "type",
+                                                    width: 120,
+                                                    render: (_, item: AdminModelCost) => <Select value={item.type} options={[{ value: "text", label: "文本" }, { value: "image", label: "图片" }, { value: "video", label: "视频" }, { value: "audio", label: "音频" }]} onChange={(type) => patchModelCost(form, setModelCosts, item, { ...defaultModelCapability(item.model, type as ModelType), displayName: item.displayName || item.model, credits: item.credits })} />,
+                                                },
+                                                {
+                                                    title: "比例",
+                                                    dataIndex: "ratios",
+                                                    width: 260,
+                                                    render: (_, item: AdminModelCost) => item.type === "image" || item.type === "video" ? <Select mode="multiple" maxTagCount="responsive" value={item.ratios} options={(item.type === "image" ? imageRatioOptions : videoRatioOptions).map((value) => ({ value, label: value }))} onChange={(ratios) => patchModelCost(form, setModelCosts, item, { ratios })} /> : "",
+                                                },
+                                                {
+                                                    title: "清晰度",
+                                                    dataIndex: "resolutions",
+                                                    width: 190,
+                                                    render: (_, item: AdminModelCost) => item.type === "image" ? <Select mode="multiple" maxTagCount="responsive" value={item.resolutions} options={imageResolutionOptions.map((value) => ({ value, label: value.toUpperCase() }))} onChange={(resolutions) => patchModelCost(form, setModelCosts, item, { resolutions })} /> : "",
+                                                },
+                                                {
+                                                    title: "质量",
+                                                    dataIndex: "qualities",
+                                                    width: 230,
+                                                    render: (_, item: AdminModelCost) => item.type === "image" ? <Select mode="multiple" maxTagCount="responsive" value={item.qualities} options={[{ value: "low", label: "普通质量" }, { value: "medium", label: "高质量" }, { value: "high", label: "超高质量" }]} onChange={(qualities) => patchModelCost(form, setModelCosts, item, { qualities })} /> : "",
+                                                },
+                                                {
+                                                    title: "最大个数",
+                                                    dataIndex: "maxCount",
+                                                    width: 110,
+                                                    render: (_, item: AdminModelCost) => item.type === "image" || item.type === "video" ? <InputNumber min={1} max={4} precision={0} value={item.maxCount} className="!w-full" onChange={(maxCount) => patchModelCost(form, setModelCosts, item, { maxCount: Number(maxCount) || 1 })} /> : "",
+                                                },
+                                                {
+                                                    title: "是否固定时长",
+                                                    dataIndex: "fixedDuration",
+                                                    width: 140,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" ? <Select value={item.fixedDuration ? "true" : "false"} options={[{ value: "true", label: "是" }, { value: "false", label: "否" }]} onChange={(value) => patchModelCost(form, setModelCosts, item, { fixedDuration: value === "true" })} /> : "",
+                                                },
+                                                {
+                                                    title: "固定时长选项",
+                                                    dataIndex: "durationOptions",
+                                                    width: 240,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" && item.fixedDuration ? <Select mode="multiple" maxTagCount="responsive" value={item.durationOptions} options={videoDurationOptions.map((value) => ({ value, label: `${value}s` }))} onChange={(durationOptions) => patchModelCost(form, setModelCosts, item, { durationOptions })} /> : "",
+                                                },
+                                                {
+                                                    title: "最长秒数",
+                                                    dataIndex: "maxSeconds",
+                                                    width: 120,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" && !item.fixedDuration ? <InputNumber min={1} max={30} precision={0} value={item.maxSeconds} className="!w-full" addonAfter="s" onChange={(maxSeconds) => patchModelCost(form, setModelCosts, item, { maxSeconds: Number(maxSeconds) || 1 })} /> : "",
+                                                },
+                                                {
+                                                    title: "画质",
+                                                    dataIndex: "videoQualities",
+                                                    width: 260,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" ? <Select mode="multiple" maxTagCount="responsive" value={item.videoQualities} options={videoQualityOptions.map((value) => ({ value, label: value.toUpperCase() }))} onChange={(videoQualities) => patchModelCost(form, setModelCosts, item, { videoQualities })} /> : "",
+                                                },
+                                                {
+                                                    title: "音频",
+                                                    dataIndex: "videoGenerateAudio",
+                                                    width: 110,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" ? <Select value={item.videoGenerateAudio ? "true" : "false"} options={[{ value: "true", label: "开启" }, { value: "false", label: "关闭" }]} onChange={(value) => patchModelCost(form, setModelCosts, item, { videoGenerateAudio: value === "true" })} /> : "",
+                                                },
+                                                {
+                                                    title: "声音",
+                                                    dataIndex: "audioVoices",
+                                                    width: 260,
+                                                    render: (_, item: AdminModelCost) => item.type === "audio" ? <Select mode="multiple" maxTagCount="responsive" value={item.audioVoices} options={audioVoiceOptions.map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }))} onChange={(audioVoices) => patchModelCost(form, setModelCosts, item, { audioVoices })} /> : "",
+                                                },
+                                                {
+                                                    title: "格式",
+                                                    dataIndex: "audioFormats",
+                                                    width: 200,
+                                                    render: (_, item: AdminModelCost) => item.type === "audio" ? <Select mode="multiple" maxTagCount="responsive" value={item.audioFormats} options={audioFormatOptions.map((value) => ({ value, label: value.toUpperCase() }))} onChange={(audioFormats) => patchModelCost(form, setModelCosts, item, { audioFormats })} /> : "",
+                                                },
+                                                {
+                                                    title: "语速",
+                                                    dataIndex: "audioSpeeds",
                                                     width: 220,
+                                                    render: (_, item: AdminModelCost) => item.type === "audio" ? <Select mode="multiple" maxTagCount="responsive" value={item.audioSpeeds} options={audioSpeedOptions.map((value) => ({ value, label: `${value}x` }))} onChange={(audioSpeeds) => patchModelCost(form, setModelCosts, item, { audioSpeeds })} /> : "",
+                                                },
+                                                {
+                                                    title: "积分",
+                                                    dataIndex: "credits",
+                                                    width: 140,
                                                     render: (_, item) => (
                                                         <Space.Compact className="!w-full">
-                                                            <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
+                                                            <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => patchModelCost(form, setModelCosts, item, { credits: Number(value) || 0 })} />
                                                             <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
                                                                 点
                                                             </span>
                                                         </Space.Compact>
                                                     ),
+                                                },
+                                                {
+                                                    title: "扣除类型",
+                                                    dataIndex: "creditType",
+                                                    width: 130,
+                                                    render: (_, item: AdminModelCost) => <Select disabled={item.type !== "video"} value={item.type === "video" ? item.creditType : "request"} options={item.type === "video" ? [{ value: "request", label: "每次" }, { value: "second", label: "每秒" }] : [{ value: "request", label: "每次" }]} onChange={(creditType) => patchModelCost(form, setModelCosts, item, { creditType })} />,
                                                 },
                                             ]}
                                         />
@@ -1132,7 +1224,7 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
 }
 
 function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChannel"]["modelCosts"][number]>[]) {
-    return items.filter((item) => item.model).map((item) => ({ model: item.model || "", credits: Math.max(0, Number(item.credits) || 0) }));
+    return items.filter((item) => item.model).map((item) => ({ ...defaultModelCapability(item.model || "", item.type), ...item, model: item.model || "", displayName: item.displayName || item.model || "", credits: Math.max(0, Number(item.credits) || 0), maxCount: Math.min(4, Math.max(0, Number(item.maxCount) || 0)), maxSeconds: Math.min(30, Math.max(0, Number(item.maxSeconds) || 0)) }));
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {
@@ -1210,14 +1302,10 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     };
 }
 
-function modelCostCredits(items: AdminSettings["public"]["modelChannel"]["modelCosts"], model: string) {
-    return items.find((item) => item.model === model)?.credits || 0;
-}
-
-function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, credits: number) {
+function patchModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, item: AdminModelCost, patch: Partial<AdminModelCost>) {
     const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminSettings["public"]["modelChannel"]["modelCosts"];
-    const next = current.filter((item) => item.model !== model);
-    next.push({ model, credits: Math.max(0, credits) });
+    const next = current.filter((entry) => entry.model !== item.model);
+    next.push({ ...item, ...patch });
     form.setFieldValue(["public", "modelChannel", "modelCosts"], next);
     setModelCosts(next);
 }

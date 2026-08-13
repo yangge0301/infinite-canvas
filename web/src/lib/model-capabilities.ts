@@ -61,7 +61,11 @@ export function defaultModelCapability(model: string, type = inferModelType(mode
 }
 
 export function modelCapabilityFor(configs: ModelCapabilityConfig[] | undefined, model: string) {
-    return configs?.find((item) => item.model === model) || defaultModelCapability(model);
+    return configuredModelCapability(configs, model) || defaultModelCapability(model);
+}
+
+export function configuredModelCapability(configs: ModelCapabilityConfig[] | undefined, model: string) {
+    return configs?.find((item) => item.model === model);
 }
 
 export function modelTypeFor(configs: ModelCapabilityConfig[] | undefined, model: string) {
@@ -75,4 +79,47 @@ export function firstAllowed(value: string, values: string[], fallback: string) 
 export function maxAllowedCount(value: string | number, capability: ModelCapabilityConfig) {
     const count = Math.max(1, Math.floor(Number(value) || 1));
     return capability.maxCount ? Math.min(count, capability.maxCount) : count;
+}
+
+export function imageSizeForCapability(value: string, capability: ModelCapabilityConfig) {
+    const ratio = capabilityRatio(value, capability.ratios, "1:1");
+    const resolution = nearestAllowedResolution(value, capability.resolutions, { "1k": 1024, "2k": 2048, "4k": 3840 }, "1k");
+    return sizeForRatio(ratio, resolution);
+}
+
+export function videoSizeForCapability(value: string, capability: ModelCapabilityConfig) {
+    const ratio = capabilityRatio(value, capability.ratios, "16:9");
+    const resolution = nearestAllowedResolution(value, capability.videoQualities, { "480p": 864, "720p": 1280, "768p": 1366, "1080p": 1920, "2k": 2560, "4k": 3840 }, "720p");
+    return sizeForRatio(ratio, resolution);
+}
+
+function capabilityRatio(value: string, ratios: string[], fallback: string) {
+    const normalized = String(value || "").replace(/-\d+k$/i, "");
+    if (ratios.includes(normalized)) return normalized;
+    const match = normalized.match(/^(\d+)x(\d+)$/);
+    if (!match) return ratios[0] || fallback;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height || !ratios.length) return ratios[0] || fallback;
+    return ratios.reduce((closest, ratio) => {
+        const [ratioWidth, ratioHeight] = ratio.split(":").map(Number);
+        return Math.abs(width / height - ratioWidth / ratioHeight) < Math.abs(width / height - Number(closest.split(":")[0]) / Number(closest.split(":")[1])) ? ratio : closest;
+    }, ratios[0]);
+}
+
+function nearestAllowedResolution(value: string, values: string[], dimensions: Record<string, number>, fallback: string) {
+    const direct = String(value || "").match(/-(\d+k)$/i)?.[1]?.toLowerCase();
+    if (direct && values.includes(direct)) return dimensions[direct];
+    const size = String(value || "").match(/^(\d+)x(\d+)$/);
+    if (!size || !values.length) return dimensions[values[0] || fallback];
+    const edge = Math.max(Number(size[1]), Number(size[2]));
+    const closest = values.reduce((current, option) => Math.abs(edge - dimensions[option]) < Math.abs(edge - dimensions[current]) ? option : current, values[0]);
+    return dimensions[closest] || dimensions[fallback];
+}
+
+function sizeForRatio(ratio: string, longEdge: number) {
+    const [width, height] = ratio.split(":").map(Number);
+    if (!width || !height || !longEdge) return "1024x1024";
+    if (width >= height) return `${longEdge}x${Math.max(16, Math.round((longEdge * height) / width / 16) * 16)}`;
+    return `${Math.max(16, Math.round((longEdge * width) / height / 16) * 16)}x${longEdge}`;
 }

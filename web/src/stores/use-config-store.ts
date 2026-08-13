@@ -6,6 +6,7 @@ import { persist } from "zustand/middleware";
 
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
+import { modelTypeFor } from "@/lib/model-capabilities";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
@@ -175,10 +176,10 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         };
     }
     const models = modelChannel.availableModels;
-    const textModels = filterModelsByCapability(models, "text");
-    const imageModels = filterModelsByCapability(models, "image");
-    const videoModels = filterModelsByCapability(models, "video");
-    const audioModels = filterModelsByCapability(models, "audio");
+    const textModels = filterModelsByCapability(models, "text", modelChannel.modelCosts);
+    const imageModels = filterModelsByCapability(models, "image", modelChannel.modelCosts);
+    const videoModels = filterModelsByCapability(models, "video", modelChannel.modelCosts);
+    const audioModels = filterModelsByCapability(models, "audio", modelChannel.modelCosts);
     const fallbackTextModel = validDefault(modelChannel.defaultTextModel, textModels) || preferredModel(textModels, isTextModelName);
     const fallbackModel = validDefault(modelChannel.defaultModel, textModels) || fallbackTextModel;
     const fallbackImageModel = validDefault(modelChannel.defaultImageModel, imageModels) || preferredModel(imageModels, isImageModelName);
@@ -297,16 +298,17 @@ function isTextModelName(model: string) {
     return !isImageModelName(model) && !isVideoModelName(model) && !isAudioModelName(model);
 }
 
-export function modelMatchesCapability(model: string, capability?: ModelCapability) {
+export function modelMatchesCapability(model: string, capability?: ModelCapability, modelConfigs?: AdminPublicSettings["modelChannel"]["modelCosts"]) {
     if (!capability) return true;
+    if (modelConfigs) return modelTypeFor(modelConfigs, model) === capability;
     if (capability === "image") return isImageModelName(model);
     if (capability === "video") return isVideoModelName(model);
     if (capability === "audio") return isAudioModelName(model);
     return isTextModelName(model);
 }
 
-export function filterModelsByCapability(models: string[], capability?: ModelCapability) {
-    return capability ? models.filter((model) => modelMatchesCapability(model, capability)) : models;
+export function filterModelsByCapability(models: string[], capability?: ModelCapability, modelConfigs?: AdminPublicSettings["modelChannel"]["modelCosts"]) {
+    return capability ? models.filter((model) => modelMatchesCapability(model, capability, modelConfigs)) : models;
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {

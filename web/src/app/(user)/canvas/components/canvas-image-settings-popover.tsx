@@ -8,6 +8,8 @@ import { Button, Switch, Tooltip } from "antd";
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
+import { modelCapabilityFor } from "@/lib/model-capabilities";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeImageSettingsPanel, canvasNodeImageSettingsLabel } from "./canvas-node-image-settings-panel";
@@ -37,6 +39,8 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const capability = modelCapabilityFor(modelCosts, config.model);
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
@@ -71,7 +75,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [canvasScale, onOpenChange, open, positionVersion]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} showSize={effectiveShowSize} showCount={effectiveShowCount} variant={variant} canvasScale={canvasScale} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} showSize={effectiveShowSize} showCount={effectiveShowCount} variant={variant} canvasScale={canvasScale} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} /> : null;
 
     return (
         <>
@@ -103,6 +107,7 @@ function ImageSettingsPortal({
     placement,
     theme,
     config,
+    capability,
     onConfigChange,
     showSize,
     showCount,
@@ -116,6 +121,7 @@ function ImageSettingsPortal({
     placement: CanvasImageSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
+    capability: ReturnType<typeof modelCapabilityFor>;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     showSize: boolean;
     showCount: boolean;
@@ -161,10 +167,11 @@ function ImageSettingsPortal({
             onClick={(event) => event.stopPropagation()}
         >
             {variant === "node" ? (
-                <CanvasNodeImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} showSize={showSize} showCount={showCount} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} />
+                <CanvasNodeImageSettingsPanel config={config} capability={capability} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} showSize={showSize} showCount={showCount} reuseImageAsReference={reuseImageAsReference} onReuseImageAsReferenceChange={onReuseImageAsReferenceChange} />
             ) : (
                 <ImageSettingsPanel
                     config={config}
+                    capability={capability}
                     onConfigChange={(key, value) => onConfigChange(key, value)}
                     theme={theme}
                     className="space-y-4"

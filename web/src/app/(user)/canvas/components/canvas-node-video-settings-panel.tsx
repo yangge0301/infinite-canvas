@@ -1,8 +1,9 @@
 "use client";
 
-import { Input, Switch } from "antd";
+import { Input } from "antd";
 
 import type { CanvasTheme } from "@/lib/canvas-theme";
+import { firstAllowed, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import { normalizeSeedanceRatio } from "@/lib/seedance-video";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { CanvasNodeMetadata } from "../types";
@@ -10,10 +11,10 @@ import type { CanvasNodeMetadata } from "../types";
 const ratioOptions = [
     { value: "21:9", width: 21, height: 9 },
     { value: "16:9", width: 16, height: 9 },
-    { value: "4:3", width: 4, height: 3 },
-    { value: "1:1", width: 1, height: 1 },
-    { value: "3:4", width: 3, height: 4 },
     { value: "9:16", width: 9, height: 16 },
+    { value: "4:3", width: 4, height: 3 },
+    { value: "3:4", width: 3, height: 4 },
+    { value: "1:1", width: 1, height: 1 },
 ] as const;
 
 const qualityOptions = [
@@ -35,69 +36,32 @@ type CanvasNodeVideoSettingsPanelProps = {
     metadata?: CanvasNodeMetadata;
     theme: CanvasTheme;
     audioSupported: boolean;
+    capability: ModelCapabilityConfig;
     onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio", value: string) => void;
     onMetadataChange?: (patch: Partial<CanvasNodeMetadata>) => void;
 };
 
-export function CanvasNodeVideoSettingsPanel({ config, metadata, theme, audioSupported, onConfigChange, onMetadataChange }: CanvasNodeVideoSettingsPanelProps) {
-    const customSeconds = Boolean(metadata?.videoCustomSeconds);
-    const seconds = normalizeSeconds(config.videoSeconds);
-    const ratio = normalizeSeedanceRatio(config.size);
-    const resolution = normalizeResolution(config.vquality);
-    const audioEnabled = config.videoGenerateAudio === "true";
+export function CanvasNodeVideoSettingsPanel({ config, metadata, theme, audioSupported, capability, onConfigChange, onMetadataChange }: CanvasNodeVideoSettingsPanelProps) {
+    const fixedDuration = capability.fixedDuration;
+    const durationOptions = capability.durationOptions;
+    const maxSeconds = capability.maxSeconds || 15;
+    const seconds = fixedDuration ? Number(firstAllowed(config.videoSeconds, durationOptions, durationOptions[0] || "5")) : normalizeSeconds(config.videoSeconds, maxSeconds);
+    const ratio = firstAllowed(normalizeSeedanceRatio(config.size), capability.ratios, capability.ratios[0] || "16:9");
+    const resolution = firstAllowed(normalizeResolution(config.vquality), capability.videoQualities, capability.videoQualities[0] || "720p");
+    const audioEnabled = capability.videoGenerateAudio && config.videoGenerateAudio === "true";
     const bitrate = metadata?.videoBitrate === "high" ? "high" : "standard";
 
     return (
         <div className="space-y-5" style={{ color: theme.node.text }}>
             <section className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-base font-semibold">时长 {seconds}S</h3>
-                    <label className="flex items-center gap-2 text-xs font-medium" style={{ color: theme.node.muted }}>
-                        自定义
-                        <span onMouseDown={(event) => event.stopPropagation()}>
-                            <Switch size="small" checked={customSeconds} onChange={(checked) => onMetadataChange?.({ videoCustomSeconds: checked })} />
-                        </span>
-                    </label>
-                </div>
-                <div className="flex items-center gap-3">
-                    <input
-                        type="range"
-                        min={1}
-                        max={30}
-                        step={1}
-                        value={seconds}
-                        disabled={customSeconds}
-                        aria-label="视频时长"
-                        className="h-2 min-w-0 flex-1 cursor-pointer accent-white disabled:cursor-not-allowed disabled:opacity-35"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onChange={(event) => onConfigChange("videoSeconds", String(Number(event.target.value)))}
-                    />
-                    {customSeconds ? (
-                        <Input
-                            type="number"
-                            min={1}
-                            max={30}
-                            value={seconds}
-                            aria-label="自定义视频时长"
-                            className="!h-11 !w-[128px] !rounded-xl"
-                            suffix="S"
-                            style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onChange={(event) => onConfigChange("videoSeconds", String(clampSeconds(event.target.value)))}
-                        />
-                    ) : (
-                        <span className="flex h-11 w-[128px] items-center justify-center rounded-xl text-lg font-semibold" style={{ background: theme.node.fill }}>
-                            {seconds} <small className="ml-1 text-xs font-medium opacity-55">S</small>
-                        </span>
-                    )}
-                </div>
-                <p className="text-xs" style={{ color: theme.node.muted }}>{customSeconds ? "已启用输入框时长；不同模型会按其可用时长自动适配。" : "拖动滑块选择时长；默认使用滑块数值。"}</p>
+                <h3 className="text-base font-semibold">时长 {seconds}S</h3>
+                {fixedDuration ? <SegmentedOptions options={durationOptions.map((value) => ({ value, label: `${value}S` }))} selected={String(seconds)} theme={theme} onSelect={(value) => onConfigChange("videoSeconds", value)} /> : <div className="flex items-center gap-3"><input type="range" min={1} max={maxSeconds} step={1} value={seconds} aria-label="视频时长" className="h-2 min-w-0 flex-1 cursor-pointer accent-white" onMouseDown={(event) => event.stopPropagation()} onChange={(event) => onConfigChange("videoSeconds", String(Number(event.target.value)))} /><Input type="number" min={1} max={maxSeconds} value={seconds} aria-label="视频时长" className="!h-11 !w-[128px] !rounded-xl" suffix="S" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onChange={(event) => onConfigChange("videoSeconds", String(clampSeconds(event.target.value, maxSeconds)))} /></div>}
             </section>
 
             <section className="space-y-2.5">
                 <SectionTitle>比例</SectionTitle>
                 <div className="grid grid-cols-6 gap-1.5 rounded-2xl p-2" style={{ background: theme.node.fill }}>
-                    {ratioOptions.map((item) => {
+                    {ratioOptions.filter((item) => capability.ratios.includes(item.value)).map((item) => {
                         const selected = ratio === item.value;
                         return (
                             <button
@@ -117,13 +81,13 @@ export function CanvasNodeVideoSettingsPanel({ config, metadata, theme, audioSup
 
             <section className="space-y-2.5">
                 <SectionTitle>画质</SectionTitle>
-                <SegmentedOptions options={qualityOptions} selected={resolution} theme={theme} onSelect={(value) => onConfigChange("vquality", value)} />
+                <SegmentedOptions options={qualityOptions.filter((item) => capability.videoQualities.includes(item.value))} selected={resolution} theme={theme} onSelect={(value) => onConfigChange("vquality", value)} />
             </section>
 
             <section className="space-y-2.5">
                 <SectionTitle>音频</SectionTitle>
-                <SegmentedOptions options={[{ value: "true", label: "开启" }, { value: "false", label: "关闭" }]} selected={audioEnabled ? "true" : "false"} theme={theme} disabled={!audioSupported} onSelect={(value) => onConfigChange("videoGenerateAudio", value)} />
-                {!audioSupported ? <p className="text-xs" style={{ color: theme.node.muted }}>当前模型不支持生成音频。</p> : null}
+                <SegmentedOptions options={[{ value: "true", label: "开启" }, { value: "false", label: "关闭" }]} selected={audioEnabled ? "true" : "false"} theme={theme} disabled={!capability.videoGenerateAudio || !audioSupported} onSelect={(value) => onConfigChange("videoGenerateAudio", value)} />
+                {!capability.videoGenerateAudio || !audioSupported ? <p className="text-xs" style={{ color: theme.node.muted }}>当前模型未配置生成音频。</p> : null}
             </section>
 
             <section className="space-y-2.5">
@@ -165,12 +129,12 @@ function AspectIcon({ width, height, color }: { width: number; height: number; c
     return <span className="rounded-[3px] border-2" style={{ width: iconWidth, height: iconHeight, borderColor: color }} />;
 }
 
-function normalizeSeconds(value: string) {
-    return clampSeconds(value || "6");
+function normalizeSeconds(value: string, maxSeconds: number) {
+    return clampSeconds(value || "1", maxSeconds);
 }
 
-function clampSeconds(value: string) {
-    return Math.max(1, Math.min(30, Math.floor(Number(value) || 1)));
+function clampSeconds(value: string, maxSeconds: number) {
+    return Math.max(1, Math.min(maxSeconds, Math.floor(Number(value) || 1)));
 }
 
 function normalizeResolution(value: string) {

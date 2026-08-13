@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { firstAllowed, imageQualityOptions, imageRatioOptions, imageResolutionOptions, modelCapabilityFor, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -44,14 +45,20 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     quickCount?: number;
+    capability?: ModelCapabilityConfig;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, titleAccessory, showSize = true, showCount = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, titleAccessory, showSize = true, showCount = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, capability }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
-    const quality = config.quality || "auto";
-    const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const activeSize = config.size || "auto";
-    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
+    const modelCapability = capability || modelCapabilityFor(undefined, config.model);
+    const allowedRatios = capability ? modelCapability.ratios : imageRatioOptions;
+    const allowedResolutions = capability ? modelCapability.resolutions : imageResolutionOptions;
+    const allowedQualities = capability ? modelCapability.qualities : imageQualityOptions;
+    const effectiveMaxCount = Math.min(maxCount, capability ? modelCapability.maxCount : maxCount);
+    const quality = firstAllowed(config.quality || "auto", allowedQualities, "auto");
+    const count = Math.max(1, Math.min(effectiveMaxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const activeSize = normalizeImageSize(config.size || "auto", allowedRatios, allowedResolutions);
+    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || aspectOptions.find((item) => item.value === allowedRatios[0]);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
@@ -80,7 +87,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {qualityOptions.map((item) => (
+                        {qualityOptions.filter((item) => allowedQualities.includes(item.value)).map((item) => (
                             <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                 {item.label}
                             </OptionPill>
@@ -110,7 +117,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <div className="space-y-2.5">
                             <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
                             <div className="grid grid-cols-4 gap-2.5">
-                                {aspectOptions.map((item) => (
+                                {aspectOptions.filter((item) => (item.value === "auto" && !capability) || (allowedRatios.includes(item.value.replace(/-\d+k$/, "")) && (!item.size || allowedResolutions.includes(item.value.match(/-(\d+)k$/)?.[1] + "k")))).map((item) => (
                                     <button
                                         key={item.value}
                                         type="button"
@@ -131,12 +138,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
                         <div className="grid grid-cols-4 gap-2.5">
-                            {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
+                            {Array.from({ length: Math.min(quickCount, effectiveMaxCount) }, (_, index) => index + 1).map((value) => (
                                 <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
                                     {value} 张
                                 </OptionPill>
                             ))}
-                            <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                            {effectiveMaxCount > 4 ? <CountInput value={count} max={effectiveMaxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} /> : null}
                         </div>
                     </div>
                 ) : null}
@@ -256,6 +263,15 @@ function readSizeDimensions(size: string, fallback: { width: number; height: num
 
 function alignDimension(value: number, enabled: boolean) {
     return enabled ? Math.ceil(value / DIMENSION_STEP) * DIMENSION_STEP : value;
+}
+
+function normalizeImageSize(value: string, ratios: string[], resolutions: string[]) {
+    if (/^\d+x\d+$/.test(value)) return value;
+    if (value === "auto") return value;
+    const baseRatio = value.replace(/-\d+k$/, "");
+    const ratio = ratios.includes(baseRatio) ? baseRatio : ratios[0] || "1:1";
+    const resolution = value.match(/-(\d+k)$/)?.[1];
+    return resolution && resolutions.includes(resolution) ? `${ratio}-${resolution}` : ratio;
 }
 
 export function imageFormatLabel(format: string) {

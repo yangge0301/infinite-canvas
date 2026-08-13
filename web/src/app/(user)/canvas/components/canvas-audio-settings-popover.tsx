@@ -8,7 +8,9 @@ import { Button } from "antd";
 import { AudioSettingsPanel, type AudioSettingKey } from "@/components/audio-settings-panel";
 import { audioFormatLabel, audioSpeedLabel, audioVoiceLabel } from "@/lib/audio-generation";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { modelCapabilityFor } from "@/lib/model-capabilities";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, mimoTtsVoiceLabel, normalizeMimoTtsFormat } from "@/lib/mimo-tts";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { ResourceSinglePicker, type CanvasVideoResourceOption } from "./canvas-video-settings-popover";
@@ -32,6 +34,8 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const capability = modelCapabilityFor(modelCosts, config.model || config.audioModel);
 
     useEffect(() => {
         if (!open) return;
@@ -56,7 +60,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
 
     const audioOptions = useMemo(() => resourceOptions.filter((item) => item.kind === "audio"), [resourceOptions]);
     const cloneAudioNodeId = validCloneAudioNodeId(metadata?.mimoVoiceCloneAudioNodeId, audioOptions);
-    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} audioOptions={audioOptions} cloneAudioNodeId={cloneAudioNodeId} onMetadataChange={onMetadataChange} /> : null;
+    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} audioOptions={audioOptions} cloneAudioNodeId={cloneAudioNodeId} onMetadataChange={onMetadataChange} /> : null;
 
     return (
         <>
@@ -70,7 +74,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
     );
 }
 
-function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, onConfigChange, audioOptions, cloneAudioNodeId, onMetadataChange }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasAudioSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; onConfigChange: CanvasAudioSettingsPopoverProps["onConfigChange"]; audioOptions: CanvasVideoResourceOption[]; cloneAudioNodeId: string; onMetadataChange?: CanvasAudioSettingsPopoverProps["onMetadataChange"] }) {
+function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, capability, onConfigChange, audioOptions, cloneAudioNodeId, onMetadataChange }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasAudioSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; capability: ReturnType<typeof modelCapabilityFor>; onConfigChange: CanvasAudioSettingsPopoverProps["onConfigChange"]; audioOptions: CanvasVideoResourceOption[]; cloneAudioNodeId: string; onMetadataChange?: CanvasAudioSettingsPopoverProps["onMetadataChange"] }) {
     const width = 356;
     const gap = 8;
     const margin = 12;
@@ -108,7 +112,7 @@ function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, o
                         onChange={(value) => onMetadataChange?.({ mimoVoiceCloneAudioNodeId: value || undefined })}
                     />
                 ) : null}
-                <AudioSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={false} className="space-y-4" />
+                <AudioSettingsPanel config={config} capability={capability} onConfigChange={onConfigChange} theme={theme} showTitle={false} className="space-y-4" />
             </div>
         </div>,
         document.body,

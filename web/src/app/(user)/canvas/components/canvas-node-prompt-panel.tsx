@@ -8,6 +8,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { firstAllowed, imageSizeForCapability, maxAllowedCount, modelCapabilityFor, videoSizeForCapability } from "@/lib/model-capabilities";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasCameraControl } from "./canvas-camera-control";
@@ -44,13 +45,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
-    const config = buildNodeConfig(globalConfig, node, mode);
+    const config = buildNodeConfig(globalConfig, node, mode, modelCosts);
     const isPanorama = isPanoramaNodeType(node.type);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = isCanvasImageNodeType(node.type) && Boolean(node.metadata?.content);
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
+    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1, seconds: mode === "video" ? config.videoSeconds : 1 });
     const isImageGenerating =
         mode === "image" &&
         (isRunning ||
@@ -157,7 +158,7 @@ function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
 }
 
-function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
+function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode, modelCosts?: Parameters<typeof modelCapabilityFor>[0]): AiConfig {
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
     const channelId = node.metadata?.channelId || "";
     const imageChannelId = mode === "image" ? channelId || globalConfig.imageChannelId : globalConfig.imageChannelId;
@@ -165,33 +166,36 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const textChannelId = mode === "text" ? channelId || globalConfig.textChannelId : globalConfig.textChannelId;
     const audioChannelId = mode === "audio" ? channelId || globalConfig.audioChannelId : globalConfig.audioChannelId;
     const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || globalConfig.activeChannelId : globalConfig.activeChannelId;
+    const model = node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model);
+    const capability = modelCapabilityFor(modelCosts, model);
+    const rawSize = node.metadata?.size || (mode === "video" ? globalConfig.videoSize || defaultConfig.videoSize : globalConfig.size || defaultConfig.size);
     return {
         ...globalConfig,
-        model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model,
         activeChannelId,
         imageChannelId,
         videoChannelId,
         textChannelId,
         audioChannelId,
-        quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
-        size: isPanoramaNodeType(node.type) ? PANORAMA_IMAGE_SIZE : node.metadata?.size || (mode === "video" ? globalConfig.videoSize || defaultConfig.videoSize : globalConfig.size || defaultConfig.size),
-        videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
-        vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
+        quality: firstAllowed(node.metadata?.quality || globalConfig.quality || defaultConfig.quality, capability.qualities, capability.qualities[0] || defaultConfig.quality),
+        size: isPanoramaNodeType(node.type) ? PANORAMA_IMAGE_SIZE : mode === "video" ? videoSizeForCapability(rawSize, capability) : mode === "image" ? imageSizeForCapability(rawSize, capability) : rawSize,
+        videoSeconds: capability.fixedDuration ? firstAllowed(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds, capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds) || 1))),
+        vquality: firstAllowed(node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality, capability.videoQualities, capability.videoQualities[0] || defaultConfig.vquality),
         videoMode: node.metadata?.mode || globalConfig.videoMode || defaultConfig.videoMode,
         videoNegativePrompt: node.metadata?.negativePrompt || globalConfig.videoNegativePrompt || defaultConfig.videoNegativePrompt,
         videoMultiShot: node.metadata?.multiShot || globalConfig.videoMultiShot || defaultConfig.videoMultiShot,
         videoShotType: node.metadata?.shotType || globalConfig.videoShotType || defaultConfig.videoShotType,
-        videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
+        videoGenerateAudio: capability.videoGenerateAudio ? node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio : "false",
         videoCharacterOrientation: node.metadata?.characterOrientation || globalConfig.videoCharacterOrientation || defaultConfig.videoCharacterOrientation,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
-        audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
-        audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
-        audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
+        audioVoice: firstAllowed(node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice, capability.audioVoices, capability.audioVoices[0] || defaultConfig.audioVoice),
+        audioFormat: firstAllowed(node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat, capability.audioFormats, capability.audioFormats[0] || defaultConfig.audioFormat),
+        audioSpeed: firstAllowed(node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed, capability.audioSpeeds, capability.audioSpeeds[0] || defaultConfig.audioSpeed),
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
         mimoTtsVoice: node.metadata?.mimoTtsVoice || globalConfig.mimoTtsVoice || defaultConfig.mimoTtsVoice,
         mimoTtsFormat: node.metadata?.mimoTtsFormat || globalConfig.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node.metadata?.mimoVoiceDesignPrompt || globalConfig.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
-        count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
+        count: String(maxAllowedCount(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count, capability)),
     };
 }
 

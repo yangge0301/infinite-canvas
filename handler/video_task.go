@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -74,13 +76,16 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	credits := 0
 	if userChannelID == "" {
-		credits, err = service.ModelCost(modelName)
-		if err != nil {
-			log.Printf("AI video read model cost failed: model=%s err=%v", modelName, err)
+		costConfig, costErr := service.ModelCostConfig(modelName)
+		if costErr != nil {
+			log.Printf("AI video read model cost failed: model=%s err=%v", modelName, costErr)
 			Fail(w, "AI 接口请求失败")
 			return
 		}
-		credits *= readAIRequestCount(body, contentType)
+		credits = costConfig.Credits
+		if costConfig.CreditType == "second" {
+			credits *= readVideoRequestSeconds(body, contentType)
+		}
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, "/videos")
 	body, contentType, err = normalizeVideoCreateBody(body, contentType, modelName, channel, upstreamPath)
@@ -182,6 +187,46 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	saveAIProxyLog(logContext, status, string(transformed), "")
 	OK(w, service.VideoTaskResponse(task))
+}
+
+func readVideoRequestSeconds(body []byte, contentType string) int {
+	seconds := 1
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		_, params, err := mime.ParseMediaType(contentType)
+		if err != nil {
+			return seconds
+		}
+		form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+		if err != nil {
+			return seconds
+		}
+		defer form.RemoveAll()
+		for _, key := range []string{"seconds", "duration"} {
+			if values := form.Value[key]; len(values) > 0 {
+				_, _ = fmt.Sscan(values[0], &seconds)
+				break
+			}
+		}
+	} else {
+		var payload struct {
+			Seconds    int `json:"seconds"`
+			Duration   int `json:"duration"`
+			NumFrames  int `json:"num_frames"`
+			FrameRate  int `json:"frame_rate"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		if payload.Seconds > 0 {
+			seconds = payload.Seconds
+		} else if payload.Duration > 0 {
+			seconds = payload.Duration
+		} else if payload.NumFrames > 1 && payload.FrameRate > 0 {
+			seconds = (payload.NumFrames - 1 + payload.FrameRate - 1) / payload.FrameRate
+		}
+	}
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
 }
 
 func readClientVideoTaskID(r *http.Request) string {

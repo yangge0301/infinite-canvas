@@ -7,7 +7,9 @@ import { Button, Input, Switch } from "antd";
 
 import { VideoSettingsPanel, isAPIMartKlingMotionControlConfig, isKIEKlingMotionControlConfig, isAPIMartKlingV3Config, isKIEKlingV3Config, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { configuredModelCapability, modelCapabilityFor } from "@/lib/model-capabilities";
 import { supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { CanvasNodeMetadata } from "../types";
@@ -41,6 +43,9 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, frameOption
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const capability = modelCapabilityFor(modelCosts, config.model || config.videoModel);
+    const audioSupported = configuredModelCapability(modelCosts, config.model || config.videoModel)?.videoGenerateAudio ?? supportsVideoAudioGeneration(config.model || config.videoModel || "");
 
     useEffect(() => {
         if (!open) return;
@@ -63,7 +68,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, frameOption
         };
     }, [canvasScale, open, positionVersion]);
 
-    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} frameOptions={frameOptions} resourceOptions={resourceOptions} metadata={metadata} firstFrameNodeId={firstFrameNodeId} lastFrameNodeId={lastFrameNodeId} onFrameChange={onFrameChange} onMetadataChange={onMetadataChange} visualOnly={visualOnly} variant={variant} canvasScale={canvasScale} /> : null;
+    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} audioSupported={audioSupported} onConfigChange={onConfigChange} frameOptions={frameOptions} resourceOptions={resourceOptions} metadata={metadata} firstFrameNodeId={firstFrameNodeId} lastFrameNodeId={lastFrameNodeId} onFrameChange={onFrameChange} onMetadataChange={onMetadataChange} visualOnly={visualOnly} variant={variant} canvasScale={canvasScale} /> : null;
 
     return (
         <>
@@ -80,7 +85,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, frameOption
     );
 }
 
-function VideoSettingsPortal({ buttonRect, panelRef, placement, theme, config, onConfigChange, frameOptions, resourceOptions, metadata, firstFrameNodeId, lastFrameNodeId, onFrameChange, onMetadataChange, visualOnly, variant, canvasScale }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasVideoSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; onConfigChange: CanvasVideoSettingsPopoverProps["onConfigChange"]; frameOptions: CanvasVideoFrameOption[]; resourceOptions: CanvasVideoResourceOption[]; metadata?: CanvasNodeMetadata; firstFrameNodeId?: string; lastFrameNodeId?: string; onFrameChange?: CanvasVideoSettingsPopoverProps["onFrameChange"]; onMetadataChange?: CanvasVideoSettingsPopoverProps["onMetadataChange"]; visualOnly: boolean; variant: NonNullable<CanvasVideoSettingsPopoverProps["variant"]>; canvasScale: number }) {
+function VideoSettingsPortal({ buttonRect, panelRef, placement, theme, config, capability, audioSupported, onConfigChange, frameOptions, resourceOptions, metadata, firstFrameNodeId, lastFrameNodeId, onFrameChange, onMetadataChange, visualOnly, variant, canvasScale }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasVideoSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; capability: ReturnType<typeof modelCapabilityFor>; audioSupported: boolean; onConfigChange: CanvasVideoSettingsPopoverProps["onConfigChange"]; frameOptions: CanvasVideoFrameOption[]; resourceOptions: CanvasVideoResourceOption[]; metadata?: CanvasNodeMetadata; firstFrameNodeId?: string; lastFrameNodeId?: string; onFrameChange?: CanvasVideoSettingsPopoverProps["onFrameChange"]; onMetadataChange?: CanvasVideoSettingsPopoverProps["onMetadataChange"]; visualOnly: boolean; variant: NonNullable<CanvasVideoSettingsPopoverProps["variant"]>; canvasScale: number }) {
     const width = variant === "node" ? 640 : 356;
     const gap = 8;
     const margin = 12;
@@ -107,7 +112,7 @@ function VideoSettingsPortal({ buttonRect, panelRef, placement, theme, config, o
             <div className="space-y-4">
                 <div className="text-lg font-semibold">视频设置</div>
                 {variant === "node" ? (
-                    <CanvasNodeVideoSettingsPanel config={config} metadata={metadata} theme={theme} audioSupported={supportsVideoAudioGeneration(model)} onConfigChange={onConfigChange} onMetadataChange={onMetadataChange} />
+                    <CanvasNodeVideoSettingsPanel config={config} metadata={metadata} theme={theme} audioSupported={audioSupported} capability={capability} onConfigChange={onConfigChange} onMetadataChange={onMetadataChange} />
                 ) : (
                     <VideoSettingsPanel config={config} modelName={visualOnly ? config.videoModel || config.model : undefined} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} showTitle={false} className="space-y-4" hideNegativePrompt={isKlingV3} visualOnly={visualOnly} />
                 )}

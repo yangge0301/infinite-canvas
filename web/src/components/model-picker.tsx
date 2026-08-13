@@ -5,7 +5,7 @@ import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { filterModelsByCapability, normalizeLocalChannels, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { filterModelsByCapability, normalizeLocalChannels, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -22,15 +22,16 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, channelId, capability, onChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const channelOptions = useMemo(() => {
         const channels =
             config.channelMode === "remote"
                 ? config.publicChannels.map((channel) => ({ id: channel.id, name: channel.name || "云端渠道", baseUrl: channel.baseUrl, models: channel.models }))
                 : normalizeLocalChannels(config).map((channel) => ({ id: channel.id, name: channel.name || "本地渠道", baseUrl: channel.baseUrl, models: channel.models }));
-        const models = channels.flatMap((channel) => (channel.models ?? []).map((model) => ({ key: `${channel.id}::${model}`, channelId: channel.id, channelName: channel.name, model })));
+        const models = channels.flatMap((channel) => (channel.models ?? []).map((model) => ({ key: `${channel.id}::${model}`, channelId: channel.id, channelName: channel.name, model, displayName: config.channelMode === "remote" ? modelCosts?.find((item) => item.model === model)?.displayName || model : model })));
         if (!capability) return models;
-        return models.filter((item) => filterModelsByCapability([item.model], capability).length > 0);
-    }, [capability, config]);
+        return models.filter((item) => filterModelsByCapability([item.model], capability, config.channelMode === "remote" ? modelCosts : undefined).length > 0);
+    }, [capability, config, modelCosts]);
     const currentOption = useMemo(() => {
         if (!value) return undefined;
         return channelOptions.find((item) => item.model === value && item.channelId === channelId) || channelOptions.find((item) => item.model === value);
@@ -80,7 +81,7 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
                 title={current || placeholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current || placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{currentOption?.displayName || current || placeholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -94,8 +95,8 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
             >
                 {options.length ? (
                     options.map((option) => (
-                        <SelectItem key={option.key} value={option.key} textValue={`${option.model} ${option.channelName}`}>
-                            <ModelLabel model={option.model} channelName={option.channelName} />
+                        <SelectItem key={option.key} value={option.key} textValue={`${option.displayName} ${option.model} ${option.channelName}`}>
+                            <ModelLabel model={option.model} displayName={option.displayName} channelName={option.channelName} />
                         </SelectItem>
                     ))
                 ) : (
@@ -108,11 +109,12 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
     );
 }
 
-function ModelLabel({ model, channelName }: { model: string; channelName?: string }) {
+function ModelLabel({ model, displayName, channelName }: { model: string; displayName?: string; channelName?: string }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{model}</span>
+            <span className="truncate">{displayName || model}</span>
+            {displayName && displayName !== model ? <span className="max-w-24 shrink-0 truncate text-xs opacity-50">{model}</span> : null}
             {channelName ? <span className="ml-auto max-w-24 shrink-0 truncate text-xs opacity-50">{channelName}</span> : null}
         </span>
     );

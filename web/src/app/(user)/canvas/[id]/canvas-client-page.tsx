@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
@@ -30,6 +30,7 @@ import { App, Button, Dropdown, Modal } from "antd";
 import { modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { isMimoVoiceCloneModel } from "@/lib/mimo-tts";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
+import { firstAllowed, imageSizeForCapability, maxAllowedCount, modelCapabilityFor, videoSizeForCapability } from "@/lib/model-capabilities";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
@@ -222,7 +223,6 @@ function ConnectionCreateMenu({ pending, onCreate, onClose }: { pending: Pending
                 <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title="音频参考" onClick={() => onCreate(CanvasNodeType.Audio)} />
                 <ConnectionCreateOption theme={theme} icon={<Globe2 className="size-5" />} title="全景图" description="文生全景、图生全景" onClick={() => onCreate(CanvasNodeType.Panorama)} />
                 <ConnectionCreateOption theme={theme} icon={<Layers3 className="size-5" />} title="3D 导演台" description="3D场景、角色、机位" onClick={() => onCreate(CanvasNodeType.Director)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title="配置节点" description="模型、尺寸、数量和输入顺序" onClick={() => onCreate(CanvasNodeType.Config)} />
             </div>
         </div>
     );
@@ -279,7 +279,6 @@ function NodeCreateMenu({
                 <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title="音频参考" onClick={() => onCreate(CanvasNodeType.Audio)} />
                 <ConnectionCreateOption theme={theme} icon={<Globe2 className="size-5" />} title="全景图" description="文生全景、图生全景" onClick={() => onCreate(CanvasNodeType.Panorama)} />
                 <ConnectionCreateOption theme={theme} icon={<Layers3 className="size-5" />} title="3D 导演台" description="3D场景、角色、机位" onClick={() => onCreate(CanvasNodeType.Director)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title="配置节点" description="模型、尺寸、数量和输入顺序" onClick={() => onCreate(CanvasNodeType.Config)} />
                 <div className="mb-2 mt-3 flex items-center justify-between px-1">
                     <span className="text-sm font-medium" style={{ color: theme.node.muted }}>添加资源</span>
                 </div>
@@ -329,6 +328,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     });
 
     const config = useConfigStore((state) => state.config);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -562,7 +562,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             videoTargets.forEach((node) => {
                 if (pollingVideoNodeIdsRef.current.has(node.id)) return;
                 const taskId = canvasVideoTaskId(node.metadata);
-                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
+                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video", modelCosts);
                 if (!taskId || !isAiConfigReady(generationConfig, generationConfig.model)) return;
                 pollingVideoNodeIdsRef.current.add(node.id);
                 void pollVideoGenerationTaskStatus(generationConfig, canvasVideoTaskFromMetadata(node.metadata))
@@ -586,7 +586,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             candidateVideoTargets.forEach(({ node, batchId, candidate }) => {
                 const pollingId = `${node.id}:${batchId}:${candidate.id}`;
                 if (pollingVideoNodeIdsRef.current.has(pollingId) || !canvasVideoCandidateTaskId(candidate)) return;
-                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
+                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video", modelCosts);
                 if (!isAiConfigReady(generationConfig, generationConfig.model)) return;
                 pollingVideoNodeIdsRef.current.add(pollingId);
                 void pollVideoGenerationTaskStatus(generationConfig, canvasVideoTaskFromCandidate(candidate))
@@ -858,7 +858,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
-    const maskEditConfig = maskEditNode ? buildGenerationConfig(effectiveConfig, maskEditNode, "image") : null;
+    const maskEditConfig = maskEditNode ? buildGenerationConfig(effectiveConfig, maskEditNode, "image", modelCosts) : null;
     const currentMaskEditModel = maskEditModel || maskEditConfig?.model || "";
     const currentMaskEditChannelId = maskEditChannelId || maskEditConfig?.imageChannelId || "";
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
@@ -2305,7 +2305,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const maskEditImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
-            const baseGenerationConfig = buildGenerationConfig(effectiveConfig, node, "image");
+            const baseGenerationConfig = buildGenerationConfig(effectiveConfig, node, "image", modelCosts);
             const generationConfig = { ...baseGenerationConfig, model: payload.model || baseGenerationConfig.model, activeChannelId: payload.channelId || baseGenerationConfig.imageChannelId || baseGenerationConfig.activeChannelId, imageChannelId: payload.channelId || baseGenerationConfig.imageChannelId, count: "1", size: node.metadata?.size || "auto" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
@@ -2383,7 +2383,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1" };
+            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image", modelCosts), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -2608,7 +2608,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode, modelCosts);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -3168,9 +3168,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 connections: connectionsRef.current,
                 selectedNodeIds: selectedNodeIdsRef.current,
                 config: agentEffectiveConfig,
+                modelCosts,
                 agentState,
             }),
-        [agentEffectiveConfig, currentProject?.title, projectId],
+        [agentEffectiveConfig, currentProject?.title, modelCosts, projectId],
     );
 
     const executeCanvasAgentAction = useCallback(
@@ -3289,7 +3290,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         imageCount: 1,
                         videoSeconds: agentEffectiveConfig.videoSeconds,
                         videoGenerateAudio: agentEffectiveConfig.videoGenerateAudio,
-                        videoSupportsAudio: supportsVideoAudioGeneration(videoModel),
+                        videoSupportsAudio: modelCapabilityFor(modelCosts, videoModel).videoGenerateAudio,
                         videoDuration: canvasAgentVideoDurationHint(videoModel),
                         audioVoice: agentEffectiveConfig.audioVoice,
                         audioFormat: agentEffectiveConfig.audioFormat,
@@ -3485,7 +3486,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         return { ok: false, code: "image_reference_required", message: "图片编辑需要至少一个已有内容的图片节点" };
                     }
 
-                    const generationConfig = buildGenerationConfig(agentEffectiveConfig, undefined, mode);
+                    const generationConfig = buildGenerationConfig(agentEffectiveConfig, undefined, mode, modelCosts);
                     if (!generationConfig.model || !isAiConfigReady(generationConfig, generationConfig.model)) {
                         return { ok: false, code: "model_not_configured", message: "请先在全局配置中完成" + (mode === "video" ? "视频" : mode === "audio" ? "音频" : "图片") + "模型配置" };
                     }
@@ -3506,10 +3507,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     if (mode === "video") {
                         metadata.vquality = generationConfig.vquality;
                         const seconds = typeof args.seconds === "number" ? args.seconds : Number(generationConfig.videoSeconds);
-                        const durationError = validateCanvasAgentVideoSeconds(generationConfig.model, seconds);
+                        const durationError = validateCanvasAgentVideoSeconds(generationConfig.model, seconds, modelCosts);
                         if (durationError) return { ok: false, code: "unsupported_duration", message: durationError, supported: canvasAgentVideoDurationHint(generationConfig.model) };
                         const generateAudio = typeof args.generateAudio === "boolean" ? args.generateAudio : generationConfig.videoGenerateAudio === "true";
-                        if (generateAudio && !supportsVideoAudioGeneration(generationConfig.model)) {
+                        if (generateAudio && !modelCapabilityFor(modelCosts, generationConfig.model).videoGenerateAudio) {
                             return { ok: false, code: "video_audio_not_supported", message: "当前全局视频模型不支持视频原生声音" };
                         }
                         metadata.seconds = String(seconds);
@@ -3561,7 +3562,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 return { ok: false, code: "tool_error", message: error instanceof Error ? error.message : "画布工具执行失败" };
             }
         },
-        [agentEffectiveConfig, createGroupFromSelection, currentProject?.title, deleteConnection, deleteNodes, getCanvasCenter, handleGenerateNode, isAiConfigReady, projectId, renameProject, updateProject],
+        [agentEffectiveConfig, createGroupFromSelection, currentProject?.title, deleteConnection, deleteNodes, getCanvasCenter, handleGenerateNode, isAiConfigReady, modelCosts, projectId, renameProject, updateProject],
     );
 
     const handleRetryNode = useCallback(
@@ -3582,7 +3583,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         size: isPanorama ? PANORAMA_IMAGE_SIZE : savedImageMetadata.size || effectiveConfig.size,
                         count: "1",
                     }
-                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
+                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image", modelCosts), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -4113,7 +4114,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onUploadMediaToCloud={(node) => void uploadNodeMediaToCloud(node)}
                     onUploadImageToCloud={(node) => void uploadNodeImageToCloud(node)}
                     onMaskEdit={(node) => {
-                        const nodeConfig = buildGenerationConfig(effectiveConfig, node, "image");
+                        const nodeConfig = buildGenerationConfig(effectiveConfig, node, "image", modelCosts);
                         setMaskEditModel(nodeConfig.model);
                         setMaskEditChannelId(nodeConfig.imageChannelId || nodeConfig.activeChannelId || "");
                         setMaskEditNodeId(node.id);
@@ -4142,7 +4143,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddPanorama={() => createNode(CanvasNodeType.Panorama)}
                     onAddDirector={() => createNode(CanvasNodeType.Director)}
-                    onAddConfig={() => createNode(CanvasNodeType.Config)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
@@ -5412,7 +5412,10 @@ function canvasAgentTaskSummary(node: CanvasNodeData) {
     };
 }
 
-function canvasAgentVideoDurationHint(modelName: string) {
+function canvasAgentVideoDurationHint(modelName: string, modelCosts?: Parameters<typeof modelCapabilityFor>[0]) {
+    const capability = modelCapabilityFor(modelCosts, modelName);
+    if (capability.fixedDuration) return { values: capability.durationOptions.map(Number), range: capability.durationOptions.map((value) => `${value} 秒`).join("、") };
+    if (capability.maxSeconds) return { values: [1, capability.maxSeconds], range: `1-${capability.maxSeconds} 秒` };
     const key = modelKey(modelName);
     if (key.includes("seedance")) return { values: [-1, 4, 5, 6, 8, 10, 12, 15], range: "智能或 4-15 秒" };
     if (isCanvasAgentKlingV3(key)) return { values: [3, 15], range: "3-15 秒" };
@@ -5420,8 +5423,11 @@ function canvasAgentVideoDurationHint(modelName: string) {
     return { values: [6, 10, 12, 16, 20], range: "1-30 秒" };
 }
 
-function validateCanvasAgentVideoSeconds(modelName: string, seconds: number) {
+function validateCanvasAgentVideoSeconds(modelName: string, seconds: number, modelCosts?: Parameters<typeof modelCapabilityFor>[0]) {
     if (!Number.isFinite(seconds)) return "视频时长无效，请先向用户确认单镜头时长";
+    const capability = modelCapabilityFor(modelCosts, modelName);
+    if (capability.fixedDuration && !capability.durationOptions.includes(String(seconds))) return `当前视频模型仅支持 ${capability.durationOptions.map((value) => `${value} 秒`).join("、")}`;
+    if (!capability.fixedDuration && capability.maxSeconds && (seconds < 1 || seconds > capability.maxSeconds)) return `当前视频模型仅支持 1-${capability.maxSeconds} 秒`;
     const key = modelKey(modelName);
     if (key.includes("seedance") && seconds !== -1 && (seconds < 4 || seconds > 15)) return "当前 Seedance 模型仅支持智能时长或 4-15 秒";
     if (isCanvasAgentKlingV3(key) && (seconds < 3 || seconds > 15)) return "当前 Kling 3 模型仅支持 3-15 秒";
@@ -5438,7 +5444,7 @@ function isCanvasAgentKlingV26(key: string) {
     return key.includes("kling-v2-6") || key.includes("kling-2-6");
 }
 
-function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
+function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode, modelCosts?: Parameters<typeof modelCapabilityFor>[0]): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
     const channelId = node?.metadata?.channelId || "";
     const imageChannelId = mode === "image" ? channelId || config.imageChannelId : config.imageChannelId;
@@ -5446,33 +5452,38 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     const textChannelId = mode === "text" ? channelId || config.textChannelId : config.textChannelId;
     const audioChannelId = mode === "audio" ? channelId || config.audioChannelId : config.audioChannelId;
     const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || config.activeChannelId : config.activeChannelId;
+    const model = node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model);
+    const capability = modelCapabilityFor(modelCosts, model);
+    const rawSize = node?.metadata?.size || (mode === "video" ? config.videoSize || defaultConfig.videoSize : config.size || defaultConfig.size);
+    const size = isPanoramaNodeType(node?.type) ? PANORAMA_IMAGE_SIZE : mode === "video" ? videoSizeForCapability(rawSize, capability) : mode === "image" ? imageSizeForCapability(rawSize, capability) : rawSize;
+    const videoSeconds = capability.fixedDuration ? firstAllowed(node?.metadata?.seconds || config.videoSeconds, capability.durationOptions, capability.durationOptions[0] || "5") : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(node?.metadata?.seconds || config.videoSeconds) || 1)));
     return {
         ...config,
-        model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        model,
         activeChannelId,
         imageChannelId,
         videoChannelId,
         textChannelId,
         audioChannelId,
-        quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
-        size: isPanoramaNodeType(node?.type) ? PANORAMA_IMAGE_SIZE : node?.metadata?.size || (mode === "video" ? config.videoSize || defaultConfig.videoSize : config.size || defaultConfig.size),
-        videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
-        vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
+        quality: firstAllowed(node?.metadata?.quality || config.quality || defaultConfig.quality, capability.qualities, capability.qualities[0] || defaultConfig.quality),
+        size,
+        videoSeconds,
+        vquality: firstAllowed(node?.metadata?.vquality || config.vquality || defaultConfig.vquality, capability.videoQualities, capability.videoQualities[0] || defaultConfig.vquality),
         videoMode: node?.metadata?.mode || config.videoMode || defaultConfig.videoMode,
         videoNegativePrompt: node?.metadata?.negativePrompt || config.videoNegativePrompt || defaultConfig.videoNegativePrompt,
         videoMultiShot: node?.metadata?.multiShot || config.videoMultiShot || defaultConfig.videoMultiShot,
         videoShotType: node?.metadata?.shotType || config.videoShotType || defaultConfig.videoShotType,
-        videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
+        videoGenerateAudio: capability.videoGenerateAudio ? node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio : "false",
         videoCharacterOrientation: node?.metadata?.characterOrientation || config.videoCharacterOrientation || defaultConfig.videoCharacterOrientation,
         videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
-        audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
-        audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
-        audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
+        audioVoice: firstAllowed(node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice, capability.audioVoices, capability.audioVoices[0] || defaultConfig.audioVoice),
+        audioFormat: firstAllowed(node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat, capability.audioFormats, capability.audioFormats[0] || defaultConfig.audioFormat),
+        audioSpeed: firstAllowed(node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed, capability.audioSpeeds, capability.audioSpeeds[0] || defaultConfig.audioSpeed),
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
         mimoTtsVoice: node?.metadata?.mimoTtsVoice || config.mimoTtsVoice || defaultConfig.mimoTtsVoice,
         mimoTtsFormat: node?.metadata?.mimoTtsFormat || config.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node?.metadata?.mimoVoiceDesignPrompt || config.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+        count: String(maxAllowedCount(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count, capability)),
     };
 }
 

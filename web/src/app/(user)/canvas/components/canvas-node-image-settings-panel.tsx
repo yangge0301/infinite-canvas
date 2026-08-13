@@ -3,6 +3,7 @@
 import { Switch } from "antd";
 
 import type { CanvasTheme } from "@/lib/canvas-theme";
+import { firstAllowed, imageQualityOptions, imageRatioOptions, imageResolutionOptions, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const ratioOptions = [
@@ -38,12 +39,17 @@ type CanvasNodeImageSettingsPanelProps = {
     showCount: boolean;
     reuseImageAsReference?: boolean;
     onReuseImageAsReferenceChange?: (value: boolean) => void;
+    capability: ModelCapabilityConfig;
 };
 
-export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, showSize, showCount, reuseImageAsReference, onReuseImageAsReferenceChange }: CanvasNodeImageSettingsPanelProps) {
-    const selected = resolveSizeSelection(config.size || "1:1");
-    const quality = config.quality === "auto" ? "medium" : config.quality || "medium";
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, showSize, showCount, reuseImageAsReference, onReuseImageAsReferenceChange, capability }: CanvasNodeImageSettingsPanelProps) {
+    const ratios = capability.ratios;
+    const resolutions = capability.resolutions;
+    const qualities = capability.qualities;
+    const selected = resolveSizeSelection(config.size || ratios[0], ratios, resolutions);
+    const quality = firstAllowed(config.quality === "auto" ? "medium" : config.quality || "medium", qualities, "medium");
+    const maxCount = capability.maxCount || 4;
+    const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const selectRatio = (ratio: (typeof ratioOptions)[number]) => onConfigChange("size", sizeForRatio(ratio, selected.resolution));
     const selectResolution = (resolution: number) => onConfigChange("size", sizeForRatio(selected.ratio, resolution));
 
@@ -53,7 +59,7 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
                 <section className="space-y-2.5">
                     <SectionTitle>比例</SectionTitle>
                     <div className="flex gap-1.5 overflow-x-auto rounded-2xl p-2 thin-scrollbar" style={{ background: theme.node.fill }}>
-                        {ratioOptions.map((ratio) => (
+                        {ratioOptions.filter((ratio) => ratios.includes(ratio.value)).map((ratio) => (
                             <button
                                 key={ratio.value}
                                 type="button"
@@ -72,13 +78,13 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
             {showSize ? (
                 <section className="space-y-2.5">
                     <SectionTitle>清晰度</SectionTitle>
-                    <SegmentedOptions options={resolutionOptions} selected={selected.resolution} theme={theme} onSelect={(item) => selectResolution(item.value)} />
+                    <SegmentedOptions options={resolutionOptions.filter((item) => resolutions.includes(`${item.value / 1024}k`))} selected={selected.resolution} theme={theme} onSelect={(item) => selectResolution(item.value)} />
                 </section>
             ) : null}
 
             <section className="space-y-2.5">
                 <SectionTitle>质量</SectionTitle>
-                <SegmentedOptions options={qualityOptions} selected={quality} theme={theme} onSelect={(item) => onConfigChange("quality", item.value)} />
+                <SegmentedOptions options={qualityOptions.filter((item) => qualities.includes(item.value))} selected={quality} theme={theme} onSelect={(item) => onConfigChange("quality", item.value)} />
             </section>
 
             {onReuseImageAsReferenceChange ? (
@@ -95,15 +101,11 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
                 <section className="space-y-2.5">
                     <SectionTitle>生成张数</SectionTitle>
                     <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_minmax(82px,1.25fr)] gap-1.5 rounded-2xl p-2" style={{ background: theme.node.fill }}>
-                        {[1, 2, 3, 4].map((value) => (
+                        {Array.from({ length: maxCount }, (_, index) => index + 1).map((value) => (
                             <button key={value} type="button" className="h-11 cursor-pointer rounded-xl text-sm font-medium transition hover:opacity-90" style={{ background: count === value ? theme.toolbar.activeBg : "transparent", color: count === value ? theme.node.text : theme.node.muted }} onClick={() => onConfigChange("count", String(value))}>
                                 {value} 张
                             </button>
                         ))}
-                        <label className="flex h-11 min-w-0 items-center justify-center gap-1 rounded-xl px-2 text-sm" style={{ background: count > 4 ? theme.toolbar.activeBg : "transparent", color: count > 4 ? theme.node.text : theme.node.muted }}>
-                            <input type="number" min={1} max={15} value={count > 4 ? count : ""} placeholder="更多" aria-label="自定义生成张数" className="min-w-0 w-11 bg-transparent text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" onChange={(event) => onConfigChange("count", String(Math.max(1, Math.min(15, Number(event.target.value) || 1))))} />
-                            <span>张</span>
-                        </label>
                     </div>
                 </section>
             ) : null}
@@ -112,7 +114,7 @@ export function CanvasNodeImageSettingsPanel({ config, onConfigChange, theme, sh
 }
 
 export function canvasNodeImageSettingsLabel(size: string) {
-    const selection = resolveSizeSelection(size || "1:1");
+    const selection = resolveSizeSelection(size || "1:1", imageRatioOptions, imageResolutionOptions);
     return `${selection.ratio.value} · ${resolutionOptions.find((option) => option.value === selection.resolution)?.label || "1K"}`;
 }
 
@@ -139,14 +141,17 @@ function AspectIcon({ width, height, color }: { width: number; height: number; c
     return <span className="border-2 rounded-[3px]" style={{ width: iconWidth, height: iconHeight, borderColor: color }} />;
 }
 
-function resolveSizeSelection(size: string) {
+function resolveSizeSelection(size: string, allowedRatios: string[], allowedResolutions: string[]) {
     const [width, height] = size.split("x").map(Number);
     if (!width || !height) {
-        const ratio = ratioOptions.find((item) => item.value === size) || ratioOptions[0];
-        return { ratio, resolution: 1 };
+        const ratio = ratioOptions.find((item) => item.value === size && allowedRatios.includes(item.value)) || ratioOptions.find((item) => allowedRatios.includes(item.value)) || ratioOptions[0];
+        const resolution = allowedResolutions.includes("2k") ? 2048 : allowedResolutions.includes("1k") ? 1024 : 3840;
+        return { ratio, resolution };
     }
-    const ratio = ratioOptions.reduce((closest, item) => (Math.abs(width / height - item.width / item.height) < Math.abs(width / height - closest.width / closest.height) ? item : closest), ratioOptions[0]);
-    return { ratio, resolution: nearestResolution(Math.max(width, height)) };
+    const allowed = ratioOptions.filter((item) => allowedRatios.includes(item.value));
+    const ratio = allowed.reduce((closest, item) => (Math.abs(width / height - item.width / item.height) < Math.abs(width / height - closest.width / closest.height) ? item : closest), allowed[0] || ratioOptions[0]);
+    const resolution = nearestResolution(Math.max(width, height));
+    return { ratio, resolution: allowedResolutions.includes(`${resolution / 1024}k`) ? resolution : allowedResolutions.includes("2k") ? 2048 : allowedResolutions.includes("1k") ? 1024 : 3840 };
 }
 
 function nearestResolution(value: number) {

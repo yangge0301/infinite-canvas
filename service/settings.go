@@ -26,6 +26,7 @@ func PublicSettings() (model.PublicSetting, error) {
 	settings.Public.ModelChannel.Channels = publicChannelInfos(settings.Private.Channels)
 	if len(settings.Public.ModelChannel.AvailableModels) == 0 {
 		settings.Public.ModelChannel.AvailableModels = enabledChannelModels(settings.Private.Channels)
+		settings.Public.ModelChannel.ModelCosts = syncModelCosts(settings.Public.ModelChannel.ModelCosts, settings.Public.ModelChannel.AvailableModels)
 	}
 	return settings.Public, err
 }
@@ -167,11 +168,9 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		setting.ModelChannel.SystemPrompts.WorkflowAgent = DefaultSystemPrompts().WorkflowAgent
 	}
 	for i := range setting.ModelChannel.ModelCosts {
-		setting.ModelChannel.ModelCosts[i].Model = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Model)
-		if setting.ModelChannel.ModelCosts[i].Credits < 0 {
-			setting.ModelChannel.ModelCosts[i].Credits = 0
-		}
+		setting.ModelChannel.ModelCosts[i] = normalizeModelCost(setting.ModelChannel.ModelCosts[i])
 	}
+	setting.ModelChannel.ModelCosts = syncModelCosts(setting.ModelChannel.ModelCosts, setting.ModelChannel.AvailableModels)
 	if setting.ModelChannel.AllowCustomChannel == nil {
 		enabled := true
 		setting.ModelChannel.AllowCustomChannel = &enabled
@@ -185,10 +184,11 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		setting.Auth.AllowRegister = &enabled
 	}
 	setting.ModelChannel.AvailableModels = filterEnabledModels(setting.ModelChannel.AvailableModels, enabledChannelModels(channels))
-	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.AvailableModels, isTextModelName)
-	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.AvailableModels, isImageModelName)
-	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.AvailableModels, isVideoModelName)
-	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, isTextModelName)
+	setting.ModelChannel.ModelCosts = syncModelCosts(setting.ModelChannel.ModelCosts, setting.ModelChannel.AvailableModels)
+	setting.ModelChannel.DefaultTextModel = repairDefaultModel(setting.ModelChannel.DefaultTextModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "text" })
+	setting.ModelChannel.DefaultImageModel = repairDefaultModel(setting.ModelChannel.DefaultImageModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "image" })
+	setting.ModelChannel.DefaultVideoModel = repairDefaultModel(setting.ModelChannel.DefaultVideoModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "video" })
+	setting.ModelChannel.DefaultModel = repairDefaultModel(setting.ModelChannel.DefaultModel, setting.ModelChannel.AvailableModels, func(modelName string) bool { return configuredModelType(setting.ModelChannel.ModelCosts, modelName) == "text" })
 	return setting
 }
 
@@ -204,6 +204,19 @@ func ModelCost(modelName string) (int, error) {
 		}
 	}
 	return 0, nil
+}
+
+func ModelCostConfig(modelName string) (model.ModelCost, error) {
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return model.ModelCost{}, err
+	}
+	for _, item := range normalizePublicSettingWithChannels(settings.Public, settings.Private.Channels).ModelChannel.ModelCosts {
+		if item.Model == strings.TrimSpace(modelName) {
+			return item, nil
+		}
+	}
+	return model.ModelCost{}, nil
 }
 
 func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting {
@@ -425,6 +438,161 @@ func isImageModelName(modelName string) bool {
 
 func isTextModelName(modelName string) bool {
 	return !isImageModelName(modelName) && !isVideoModelName(modelName)
+}
+
+var (
+	imageModelRatios      = []string{"1:1", "2:1", "3:2", "4:3", "3:4", "16:9", "9:16", "21:9", "2:3", "9:21"}
+	imageModelResolutions = []string{"1k", "2k", "4k"}
+	imageModelQualities   = []string{"low", "medium", "high"}
+	videoModelRatios      = []string{"21:9", "16:9", "9:16", "4:3", "3:4", "1:1"}
+	videoModelQualities   = []string{"480p", "720p", "768p", "1080p", "2k", "4k"}
+	videoDurationOptions  = []string{"5", "10", "15", "20", "25", "30"}
+	audioModelVoices      = []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"}
+	audioModelFormats     = []string{"mp3", "wav", "opus"}
+	audioModelSpeeds      = []string{"0.75", "1", "1.25", "1.5", "1.75", "2"}
+)
+
+func modelType(modelName string) string {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if strings.Contains(name, "video") || strings.Contains(name, "seedance") || strings.Contains(name, "sora") || strings.Contains(name, "veo") || strings.Contains(name, "kling") || strings.Contains(name, "hailuo") || strings.Contains(name, "minimax") || strings.Contains(name, "skyreels") || strings.Contains(name, "happyhorse") || strings.Contains(name, "runway") || strings.Contains(name, "aleph") || strings.Contains(name, "vidu") || strings.Contains(name, "pixverse") || strings.Contains(name, "omni-flash") || strings.Contains(name, "infinitalk") || strings.Contains(name, "wan2-5") || strings.Contains(name, "wan2.5") || strings.Contains(name, "wan2-6") || strings.Contains(name, "wan2.6") || strings.Contains(name, "wan2-7") || strings.Contains(name, "wan2.7") {
+		return "video"
+	}
+	if strings.Contains(name, "audio") || strings.Contains(name, "tts") || strings.Contains(name, "speech") || strings.Contains(name, "voice") || strings.Contains(name, "music") || strings.Contains(name, "sound") || strings.Contains(name, "elevenlabs") || strings.Contains(name, "suno") || strings.Contains(name, "lyrics") || strings.Contains(name, "vocal") || strings.Contains(name, "midi") || strings.Contains(name, "wav") {
+		return "audio"
+	}
+	if strings.Contains(name, "image") || strings.Contains(name, "nano-banana") || strings.Contains(name, "seedream") || strings.Contains(name, "dall-e") || strings.Contains(name, "dalle") || strings.Contains(name, "imagen") || strings.Contains(name, "gemini-2.5-flash") || strings.Contains(name, "gemini-3-pro") || strings.Contains(name, "gemini-3.1-flash") || strings.Contains(name, "flux") || strings.Contains(name, "kontext") || strings.Contains(name, "qwen/image") || strings.Contains(name, "ideogram") || strings.Contains(name, "recraft") || strings.Contains(name, "sdxl") || strings.Contains(name, "stable-diffusion") || strings.Contains(name, "midjourney") || strings.Contains(name, "topaz/image") || strings.Contains(name, "grok-imagine") {
+		return "image"
+	}
+	return "text"
+}
+
+func configuredModelType(costs []model.ModelCost, modelName string) string {
+	for _, item := range costs {
+		if item.Model == modelName {
+			return item.Type
+		}
+	}
+	return modelType(modelName)
+}
+
+func normalizeModelCost(item model.ModelCost) model.ModelCost {
+	item.Model = strings.TrimSpace(item.Model)
+	if item.DisplayName == "" {
+		item.DisplayName = item.Model
+	}
+	if item.Type != "image" && item.Type != "video" && item.Type != "audio" && item.Type != "text" {
+		item.Type = modelType(item.Model)
+	}
+	if item.Credits < 0 {
+		item.Credits = 0
+	}
+	if item.Type == "image" || item.Type == "video" {
+		if item.MaxCount < 1 {
+			item.MaxCount = 4
+		}
+		if item.MaxCount > 4 {
+			item.MaxCount = 4
+		}
+	} else {
+		item.MaxCount = 0
+	}
+	if item.Type == "image" {
+		item.Ratios = normalizeModelOptions(item.Ratios, imageModelRatios)
+		item.Resolutions = normalizeModelOptions(item.Resolutions, imageModelResolutions)
+		item.Qualities = normalizeModelOptions(item.Qualities, imageModelQualities)
+		item.VideoQualities = nil
+		item.DurationOptions = nil
+		item.MaxSeconds = 0
+		item.AudioVoices = nil
+		item.AudioFormats = nil
+		item.AudioSpeeds = nil
+	} else if item.Type == "video" {
+		item.Ratios = normalizeModelOptions(item.Ratios, videoModelRatios)
+		item.VideoQualities = normalizeModelOptions(item.VideoQualities, videoModelQualities)
+		item.DurationOptions = normalizeModelOptions(item.DurationOptions, videoDurationOptions)
+		if item.MaxSeconds < 1 {
+			item.MaxSeconds = 15
+		}
+		if item.MaxSeconds > 30 {
+			item.MaxSeconds = 30
+		}
+		item.Resolutions = nil
+		item.Qualities = nil
+		item.AudioVoices = nil
+		item.AudioFormats = nil
+		item.AudioSpeeds = nil
+	} else if item.Type == "audio" {
+		item.AudioVoices = normalizeModelOptions(item.AudioVoices, audioModelVoices)
+		item.AudioFormats = normalizeModelOptions(item.AudioFormats, audioModelFormats)
+		item.AudioSpeeds = normalizeModelOptions(item.AudioSpeeds, audioModelSpeeds)
+		item.Ratios = nil
+		item.Resolutions = nil
+		item.Qualities = nil
+		item.VideoQualities = nil
+		item.DurationOptions = nil
+		item.MaxSeconds = 0
+	} else {
+		item.Ratios = nil
+		item.Resolutions = nil
+		item.Qualities = nil
+		item.VideoQualities = nil
+		item.DurationOptions = nil
+		item.MaxSeconds = 0
+		item.AudioVoices = nil
+		item.AudioFormats = nil
+		item.AudioSpeeds = nil
+	}
+	if item.Type != "video" {
+		item.FixedDuration = false
+		item.VideoGenerateAudio = false
+		item.CreditType = "request"
+	} else if item.CreditType != "second" {
+		item.CreditType = "request"
+	}
+	return item
+}
+
+func normalizeModelOptions(values []string, allowed []string) []string {
+	if values == nil {
+		return append([]string{}, allowed...)
+	}
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		allowedSet[value] = true
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if allowedSet[value] {
+			result = append(result, value)
+		}
+	}
+	return uniqueModelNames(result)
+}
+
+func syncModelCosts(costs []model.ModelCost, models []string) []model.ModelCost {
+	byModel := make(map[string]model.ModelCost, len(costs))
+	for _, item := range costs {
+		item = normalizeModelCost(item)
+		if item.Model != "" {
+			byModel[item.Model] = item
+		}
+	}
+	for _, modelName := range models {
+		if _, ok := byModel[modelName]; !ok {
+			byModel[modelName] = normalizeModelCost(model.ModelCost{Model: modelName})
+		}
+	}
+	result := make([]model.ModelCost, 0, len(byModel))
+	for _, modelName := range uniqueModelNames(models) {
+		if item, ok := byModel[modelName]; ok {
+			result = append(result, item)
+			delete(byModel, modelName)
+		}
+	}
+	for _, item := range byModel {
+		result = append(result, item)
+	}
+	return result
 }
 
 func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {

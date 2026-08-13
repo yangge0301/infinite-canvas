@@ -3,10 +3,12 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { isKIEGrokVideoModel } from "@/components/video-settings-panel";
+import { configuredModelCapability } from "@/lib/model-capabilities";
 import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -273,7 +275,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         else body.append("preset", "normal");
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
-    if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
+    if (videoAudioSupported(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
     const files = await Promise.all(input.references.slice(0, kling ? 2 : 9).map(imageReferenceToFormValue));
     files.forEach((file) => body.append("input_reference[]", file));
     if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
@@ -283,6 +285,11 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     const audioFiles = kling ? [] : await Promise.all(input.audioReferences.map(mediaReferenceToFormValue));
     audioFiles.forEach((file) => body.append("audio_reference[]", file));
     return body;
+}
+
+function videoAudioSupported(model: string) {
+    const configured = configuredModelCapability(useConfigStore.getState().publicSettings?.modelChannel.modelCosts, model);
+    return configured ? configured.videoGenerateAudio : supportsVideoAudioGeneration(model);
 }
 
 function isAPIMartKlingV26VideoConfig(config: AiConfig, model: string) {
