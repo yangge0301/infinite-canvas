@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
+import { uploadTemporaryReferenceFiles } from "@/services/api/reference-upload";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
@@ -866,9 +867,10 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
         formData.set("partial_images", String(params.streamPartialImages));
     }
     const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    files.forEach((file) => formData.append("image", file));
-
     const directProvider = !usesAccountProxy(config) ? directAIProviderForConfig(config) : null;
+    const temporaryUrls = !usesAccountProxy(config) && !directProvider ? await uploadTemporaryReferenceFiles(files) : [];
+    (temporaryUrls.length ? temporaryUrls : files).forEach((file) => formData.append("image", file));
+
     if (directProvider) {
         const { requestDirectImages } = await import("@/services/api/direct-ai");
         return parseImagePayload(await requestDirectImages(config, directProvider, "/images/edits", formData, params.timeoutSeconds), mime);

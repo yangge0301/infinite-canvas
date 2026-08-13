@@ -6,6 +6,7 @@ import { isKIEGrokVideoModel } from "@/components/video-settings-panel";
 import { configuredModelCapability } from "@/lib/model-capabilities";
 import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { uploadTemporaryReferenceFiles } from "@/services/api/reference-upload";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
 import { useConfigStore } from "@/stores/use-config-store";
@@ -277,13 +278,31 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
     if (videoAudioSupported(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
     const files = await Promise.all(input.references.slice(0, kling ? 2 : 9).map(imageReferenceToFormValue));
-    files.forEach((file) => body.append("input_reference[]", file));
-    if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
-    if (!kling && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame));
+    const directTemporaryUpload = !usesAccountProxy(config) && !directAIProviderForConfig(config);
+    const imageFiles = files.filter((file): file is File => file instanceof File);
+    const imageURLs = directTemporaryUpload && imageFiles.length ? await uploadTemporaryReferenceFiles(imageFiles) : [];
+    let imageIndex = 0;
+    files.forEach((file) => body.append("input_reference[]", file instanceof File && imageURLs.length ? imageURLs[imageIndex++] : file));
+    if (!kling && input.firstFrame) {
+        const firstFrame = await imageReferenceToFormValue(input.firstFrame);
+        const urls = directTemporaryUpload && firstFrame instanceof File ? await uploadTemporaryReferenceFiles([firstFrame]) : [];
+        body.append("first_frame_url", urls[0] || firstFrame);
+    }
+    if (!kling && input.lastFrame) {
+        const lastFrame = await imageReferenceToFormValue(input.lastFrame);
+        const urls = directTemporaryUpload && lastFrame instanceof File ? await uploadTemporaryReferenceFiles([lastFrame]) : [];
+        body.append("last_frame_url", urls[0] || lastFrame);
+    }
     const videoFiles = kling ? [] : await Promise.all(input.videoReferences.map(mediaReferenceToFormValue));
-    videoFiles.forEach((file) => body.append("video_reference[]", file));
+    const videoUploadFiles = videoFiles.filter((file): file is File => file instanceof File);
+    const videoURLs = directTemporaryUpload && videoUploadFiles.length ? await uploadTemporaryReferenceFiles(videoUploadFiles) : [];
+    let videoIndex = 0;
+    videoFiles.forEach((file) => body.append("video_reference[]", file instanceof File && videoURLs.length ? videoURLs[videoIndex++] : file));
     const audioFiles = kling ? [] : await Promise.all(input.audioReferences.map(mediaReferenceToFormValue));
-    audioFiles.forEach((file) => body.append("audio_reference[]", file));
+    const audioUploadFiles = audioFiles.filter((file): file is File => file instanceof File);
+    const audioURLs = directTemporaryUpload && audioUploadFiles.length ? await uploadTemporaryReferenceFiles(audioUploadFiles) : [];
+    let audioIndex = 0;
+    audioFiles.forEach((file) => body.append("audio_reference[]", file instanceof File && audioURLs.length ? audioURLs[audioIndex++] : file));
     return body;
 }
 

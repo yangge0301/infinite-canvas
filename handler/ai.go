@@ -105,6 +105,10 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	setAIRequestAuthorization(request, channel)
+	if isPrivateVideoProtocol(channel) && isPrivateVideoPath(path) {
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		request.Header.Del("x-goog-api-key")
+	}
 	copyAIResponse(w, request, channel, aiLogContext{StartedAt: startedAt, Endpoint: path, Method: http.MethodGet, Model: modelName, Channel: channel, UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), RequestBody: summarizeQueryParams(r.URL.Query())}, nil)
 }
 
@@ -142,6 +146,14 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
+	if path == "/images/edits" && !isGeminiChannel(channel) {
+		body, contentType, err = replaceReferenceFormFilesWithURLs(body, contentType, channel)
+		if err != nil {
+			log.Printf("AI proxy upload image references failed: model=%s err=%v", modelName, err)
+			Fail(w, err.Error())
+			return
+		}
+	}
 	if isGeminiChannel(channel) {
 		body, contentType, err = normalizeGeminiRequest(body, contentType, modelName, path)
 		if err != nil {
@@ -455,7 +467,7 @@ func readMultipartModel(body []byte, contentType string) string {
 		return ""
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
-	form, err := reader.ReadForm(32 << 20)
+	form, err := reader.ReadForm(256 << 20)
 	if err != nil {
 		return ""
 	}
@@ -505,6 +517,9 @@ func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string
 		values.Set("model_name", modelName)
 		return baseURL + "/agnesapi?" + values.Encode()
 	}
+	if isPrivateVideoProtocol(channel) && isPrivateVideoPath(path) {
+		channel.Protocol = "openai"
+	}
 	return service.BuildModelChannelURL(channel, path)
 }
 
@@ -527,7 +542,22 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 	return "", false
 }
 
+func isPrivateVideoPath(path string) bool {
+	return path == "/videos" || strings.HasPrefix(path, "/videos/") || path == "/video/generations" || strings.HasPrefix(path, "/video/generations/")
+}
+
 func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
+	if isPrivateVideoProtocol(channel) && isPrivateVideoPath(path) {
+		if privateVideoProtocol(channel) == "kk" && strings.EqualFold(strings.TrimSpace(modelName), "video-v1") {
+			if path == "/videos" {
+				return "/video/generations"
+			}
+			if strings.HasPrefix(path, "/videos/") {
+				return "/video/generations/" + strings.TrimPrefix(path, "/videos/")
+			}
+		}
+		return path
+	}
 	if isGeminiChannel(channel) {
 		return geminiAPIPath(modelName)
 	}

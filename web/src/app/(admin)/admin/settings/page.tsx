@@ -45,7 +45,7 @@ const emptySettings: AdminSettings = {
     },
     private: { channels: [], promptSync: { enabled: true, cron: "0 0 * * *" }, aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, allowUserGlobalProvider: true, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
-const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", customProtocol: "general", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
 const emptyS3StorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", username: "", password: "", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
 const emptyWebDAVStorageProvider: AdminStorageProvider = { ...emptyS3StorageProvider, name: "", type: "webdav", region: "" };
 
@@ -1004,6 +1004,18 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
+                                <Form.Item name="customProtocol" label="私有定制协议" extra="仅视频模型使用，其他模型仍按通用流程请求">
+                                    <Select
+                                        options={[
+                                            { label: "通用协议", value: "general" },
+                                            { label: "kk私有协议", value: "kk" },
+                                            { label: "mikito私有协议", value: "mikito" },
+                                            { label: "mikito私有sora协议", value: "mikito_sora" },
+                                        ]}
+                                    />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
                                 <Form.Item name="weight" label="权重">
                                     <InputNumber min={1} step={1} className="!w-full" />
                                 </Form.Item>
@@ -1298,6 +1310,7 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     return {
         id: item.id || "",
         protocol: item.protocol || "openai",
+        customProtocol: item.customProtocol || "general",
         name: item.name || "",
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",

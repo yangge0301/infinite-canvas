@@ -250,6 +250,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		if setting.Channels[i].Timeout <= 0 {
 			setting.Channels[i].Timeout = 600
 		}
+		setting.Channels[i].CustomProtocol = normalizeCustomProtocol(setting.Channels[i].CustomProtocol)
 	}
 	return setting
 }
@@ -629,7 +630,21 @@ func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
 	if channel.Timeout <= 0 {
 		channel.Timeout = 600
 	}
+	channel.CustomProtocol = normalizeCustomProtocol(channel.CustomProtocol)
 	return channel
+}
+
+func normalizeCustomProtocol(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "kk", "kk_private", "kk-private":
+		return "kk"
+	case "mikito":
+		return "mikito"
+	case "mikito_sora", "mikito-sora", "sora":
+		return "mikito_sora"
+	default:
+		return "general"
+	}
 }
 
 func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelChannel, error) {

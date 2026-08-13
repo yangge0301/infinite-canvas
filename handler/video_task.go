@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -74,7 +75,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
-	if isGeminiChannel(channel) {
+	if isGeminiChannel(channel) && !isPrivateVideoProtocol(channel) {
 		Fail(w, "Gemini 渠道暂不支持视频生成")
 		return
 	}
@@ -95,16 +96,25 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	body, contentType, err = normalizeVideoCreateBody(body, contentType, modelName, channel, upstreamPath)
 	if err != nil {
 		log.Printf("AI video normalize request failed: model=%s err=%v", modelName, err)
+		if isPrivateVideoProtocol(channel) {
+			Fail(w, err.Error())
+			return
+		}
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, upstreamPath), bytes.NewReader(body))
+	requestURL := resolveAIProxyURL(channel, modelName, upstreamPath)
+	request, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("AI video build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, upstreamPath), err)
+		log.Printf("AI video build request failed: url=%s err=%v", requestURL, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	setAIRequestAuthorization(request, channel)
+	if isPrivateVideoProtocol(channel) {
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		request.Header.Del("x-goog-api-key")
+	}
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -170,7 +180,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		ChannelName:     channel.Name,
 		Source:          readVideoTaskSource(r),
 		SourceID:        readVideoTaskSourceID(r),
-		ClientTaskID:     readClientVideoTaskID(r),
+		ClientTaskID:    readClientVideoTaskID(r),
 		UpstreamTaskID:  parsed.UpstreamTaskID,
 		UpstreamVideoID: parsed.UpstreamVideoID,
 		Status:          parsed.Status,
@@ -200,7 +210,7 @@ func readVideoRequestSeconds(body []byte, contentType string) int {
 		if err != nil {
 			return seconds
 		}
-		form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+		form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(256 << 20)
 		if err != nil {
 			return seconds
 		}
@@ -213,10 +223,10 @@ func readVideoRequestSeconds(body []byte, contentType string) int {
 		}
 	} else {
 		var payload struct {
-			Seconds    int `json:"seconds"`
-			Duration   int `json:"duration"`
-			NumFrames  int `json:"num_frames"`
-			FrameRate  int `json:"frame_rate"`
+			Seconds   int `json:"seconds"`
+			Duration  int `json:"duration"`
+			NumFrames int `json:"num_frames"`
+			FrameRate int `json:"frame_rate"`
 		}
 		_ = json.Unmarshal(body, &payload)
 		if payload.Seconds > 0 {
@@ -296,6 +306,10 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 		return service.VideoTaskPollUpdate{}, err
 	}
 	setAIRequestAuthorization(request, channel)
+	if isPrivateVideoProtocol(channel) {
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		request.Header.Del("x-goog-api-key")
+	}
 	startedAt := time.Now()
 	logContext := aiLogContext{
 		StartedAt:       startedAt,
@@ -322,6 +336,9 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	}
 	transformed := transformVideoStatusPayload(payload, request, channel, task.Model)
 	parsed := parseVideoTaskPayload(transformed, task.Model)
+	if isPrivateVideoProtocol(channel) && (strings.HasPrefix(parsed.VideoURL, "/") || strings.Contains(parsed.VideoURL, "/v1/videos/") && strings.Contains(parsed.VideoURL, "/content")) {
+		parsed.VideoURL = fmt.Sprintf("/api/v1/videos/%s/content?model=%s", url.PathEscape(pollID), url.QueryEscape(task.Model))
+	}
 	if parsed.Status == "failed" && parsed.Error == "" {
 		parsed.Error = firstNonEmpty(parsed.ErrorDetail, "视频任务生成失败")
 	}
@@ -348,6 +365,14 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 }
 
 func normalizeVideoCreateBody(body []byte, contentType string, modelName string, channel model.ModelChannel, upstreamPath string) ([]byte, string, error) {
+	if isPrivateVideoProtocol(channel) {
+		return normalizePrivateVideoBody(body, contentType, modelName, channel)
+	}
+	var err error
+	body, contentType, err = replaceReferenceFormFilesWithURLs(body, contentType, channel)
+	if err != nil {
+		return body, contentType, err
+	}
 	if isKIEChannel(channel, modelName) && upstreamPath == "/jobs/createTask" {
 		return normalizeKIEVideoBody(body, contentType, modelName, channel)
 	}
@@ -434,7 +459,7 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 		Progress:        readIntPath(data, "progress"),
 		Seconds:         firstNonEmpty(readStringPath(data, "seconds"), readStringPath(data, "duration")),
 		Size:            firstNonEmpty(readStringPath(data, "size"), readSizeFromDimensions(data)),
-		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), findFirstHTTPURL(data)),
+		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "content_url"), readStringPath(data, "url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), findFirstHTTPURL(data)),
 		Error:           firstNonEmpty(readStringPath(data, "error.message"), readStringPath(data, "error")),
 		ErrorDetail:     "",
 	}

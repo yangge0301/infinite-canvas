@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,8 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tigerowo/infinite-canvas/config"
 	"github.com/google/uuid"
+	"github.com/tigerowo/infinite-canvas/config"
+	"github.com/tigerowo/infinite-canvas/model"
 )
 
 const (
@@ -31,11 +33,6 @@ type referenceMediaUploadResult struct {
 }
 
 func UploadReferenceMedia(w http.ResponseWriter, r *http.Request) {
-	publicBaseURL := strings.TrimRight(strings.TrimSpace(config.Cfg.PublicBaseURL), "/")
-	if publicBaseURL == "" {
-		Fail(w, "未配置 PUBLIC_BASE_URL，无法把本地参考素材提供给火山方舟访问")
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, referenceMediaMaxBytes+1)
 	if err := r.ParseMultipartForm(referenceMediaMaxBytes); err != nil {
 		Fail(w, "参考素材过大或上传格式不正确")
@@ -51,45 +48,53 @@ func UploadReferenceMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	mimeType, ext, ok := normalizeReferenceMediaType(header.Header.Get("Content-Type"), filepath.Ext(header.Filename))
+	mimeType, _, ok := normalizeReferenceMediaType(header.Header.Get("Content-Type"), filepath.Ext(header.Filename))
 	if !ok {
 		Fail(w, "参考素材格式不支持，请使用 "+referenceMediaAllowedText)
 		return
 	}
-	if err := os.MkdirAll(referenceMediaDir(), 0o755); err != nil {
-		Fail(w, "参考素材保存失败")
+	data, err := io.ReadAll(io.LimitReader(file, referenceMediaMaxBytes+1))
+	if err != nil {
+		Fail(w, "参考素材读取失败")
 		return
+	}
+	url, err := uploadReferenceFile(model.ModelChannel{}, referenceUploadFile{Name: header.Filename, Type: mimeType, Data: data})
+	if err != nil {
+		Fail(w, err.Error())
+		return
+	}
+	OK(w, referenceMediaUploadResult{ID: uuid.NewString(), URL: url, MimeType: mimeType, Bytes: int64(len(data))})
+}
+
+func storeReferenceMedia(data []byte, mimeType string, filename string) (referenceMediaUploadResult, error) {
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(config.Cfg.PublicBaseURL), "/")
+	if publicBaseURL == "" {
+		return referenceMediaUploadResult{}, errors.New("未配置 PUBLIC_BASE_URL，无法把本地参考素材提供给上游访问")
+	}
+	if len(data) == 0 {
+		return referenceMediaUploadResult{}, errors.New("参考素材为空")
+	}
+	if limit := referenceMediaTypeMaxBytes(mimeType); limit > 0 && int64(len(data)) > limit {
+		return referenceMediaUploadResult{}, errors.New(referenceMediaSizeMessage(mimeType))
+	}
+	_, ext, ok := normalizeReferenceMediaType(mimeType, filepath.Ext(filename))
+	if !ok {
+		return referenceMediaUploadResult{}, errors.New("参考素材格式不支持")
+	}
+	if err := os.MkdirAll(referenceMediaDir(), 0o755); err != nil {
+		return referenceMediaUploadResult{}, errors.New("参考素材保存失败")
 	}
 	id := uuid.NewString() + ext
 	targetPath := filepath.Join(referenceMediaDir(), id)
 	target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		Fail(w, "参考素材保存失败")
-		return
+		return referenceMediaUploadResult{}, errors.New("参考素材保存失败")
 	}
-	bytes, copyErr := io.Copy(target, file)
-	closeErr := target.Close()
-	if copyErr != nil || closeErr != nil {
+	if _, err := target.Write(data); err != nil || target.Close() != nil {
 		_ = os.Remove(targetPath)
-		Fail(w, "参考素材保存失败")
-		return
+		return referenceMediaUploadResult{}, errors.New("参考素材保存失败")
 	}
-	if bytes <= 0 {
-		_ = os.Remove(targetPath)
-		Fail(w, "参考素材为空")
-		return
-	}
-	if limit := referenceMediaTypeMaxBytes(mimeType); limit > 0 && bytes > limit {
-		_ = os.Remove(targetPath)
-		Fail(w, referenceMediaSizeMessage(mimeType))
-		return
-	}
-	OK(w, referenceMediaUploadResult{
-		ID:       id,
-		URL:      fmt.Sprintf("%s/api/media/references/%s", publicBaseURL, id),
-		MimeType: mimeType,
-		Bytes:    bytes,
-	})
+	return referenceMediaUploadResult{ID: id, URL: fmt.Sprintf("%s/api/media/references/%s", publicBaseURL, id), MimeType: mimeType, Bytes: int64(len(data))}, nil
 }
 
 func ReferenceMedia(w http.ResponseWriter, r *http.Request, id string) {

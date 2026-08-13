@@ -335,7 +335,8 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `protocol` | string | 协议，当前支持 `openai` |
+| `protocol` | string | 渠道基础协议，例如 `openai`、`gemini`、`ark`、`kie`、`mimo` |
+| `customProtocol` | string | 私有定制协议：`general`、`kk`、`mikito`、`mikito_sora`；仅视频模型请求使用，默认 `general` |
 | `name` | string | 渠道名称 |
 | `baseUrl` | string | 渠道接口地址 |
 | `apiKey` | string | 渠道密钥 |

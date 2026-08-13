@@ -14,37 +14,38 @@ const (
 
 // ModelChannel 模型渠道配置。
 type ModelChannel struct {
-	ID       string   `json:"id"`
-	Protocol string   `json:"protocol"`
-	Name     string   `json:"name"`
-	BaseURL  string   `json:"baseUrl"`
-	APIKey   string   `json:"apiKey"`
-	Models   []string `json:"models"`
-	Weight   int      `json:"weight"`
-	Timeout  int      `json:"timeout"`
-	Enabled  bool     `json:"enabled"`
-	Remark   string   `json:"remark"`
+	ID             string   `json:"id"`
+	Protocol       string   `json:"protocol"`
+	Name           string   `json:"name"`
+	BaseURL        string   `json:"baseUrl"`
+	APIKey         string   `json:"apiKey"`
+	Models         []string `json:"models"`
+	Weight         int      `json:"weight"`
+	Timeout        int      `json:"timeout"`
+	Enabled        bool     `json:"enabled"`
+	Remark         string   `json:"remark"`
+	CustomProtocol string   `json:"customProtocol"`
 }
 
 // ModelCost 模型算力点配置。
 type ModelCost struct {
-	Model                string   `json:"model"`
-	DisplayName          string   `json:"displayName"`
-	Type                 string   `json:"type"`
-	Credits              int      `json:"credits"`
-	Ratios               []string `json:"ratios"`
-	Resolutions          []string `json:"resolutions"`
-	Qualities            []string `json:"qualities"`
-	MaxCount             int      `json:"maxCount"`
-	FixedDuration        bool     `json:"fixedDuration"`
-	DurationOptions      []string `json:"durationOptions"`
-	MaxSeconds           int      `json:"maxSeconds"`
-	VideoQualities       []string `json:"videoQualities"`
-	VideoGenerateAudio   bool     `json:"videoGenerateAudio"`
-	AudioVoices          []string `json:"audioVoices"`
-	AudioFormats         []string `json:"audioFormats"`
-	AudioSpeeds          []string `json:"audioSpeeds"`
-	CreditType           string   `json:"creditType"`
+	Model              string   `json:"model"`
+	DisplayName        string   `json:"displayName"`
+	Type               string   `json:"type"`
+	Credits            int      `json:"credits"`
+	Ratios             []string `json:"ratios"`
+	Resolutions        []string `json:"resolutions"`
+	Qualities          []string `json:"qualities"`
+	MaxCount           int      `json:"maxCount"`
+	FixedDuration      bool     `json:"fixedDuration"`
+	DurationOptions    []string `json:"durationOptions"`
+	MaxSeconds         int      `json:"maxSeconds"`
+	VideoQualities     []string `json:"videoQualities"`
+	VideoGenerateAudio bool     `json:"videoGenerateAudio"`
+	AudioVoices        []string `json:"audioVoices"`
+	AudioFormats       []string `json:"audioFormats"`
+	AudioSpeeds        []string `json:"audioSpeeds"`
+	CreditType         string   `json:"creditType"`
 }
 
 // PublicModelChannelSetting 公开模型渠道配置。
@@ -71,15 +72,15 @@ type SystemPromptSetting struct {
 }
 
 type PublicModelChannelInfo struct {
-	ID      string   `json:"id"`
-	Protocol string  `json:"protocol"`
-	Name    string   `json:"name"`
-	BaseURL string   `json:"baseUrl"`
-	Models  []string `json:"models"`
-	Weight  int      `json:"weight"`
-	Timeout int      `json:"timeout"`
-	Enabled bool     `json:"enabled"`
-	Remark  string   `json:"remark"`
+	ID       string   `json:"id"`
+	Protocol string   `json:"protocol"`
+	Name     string   `json:"name"`
+	BaseURL  string   `json:"baseUrl"`
+	Models   []string `json:"models"`
+	Weight   int      `json:"weight"`
+	Timeout  int      `json:"timeout"`
+	Enabled  bool     `json:"enabled"`
+	Remark   string   `json:"remark"`
 }
 
 // PublicSetting 公开配置。
