@@ -164,7 +164,7 @@ export async function deleteAdminAsset(token: string, id: string) {
 
 export type AdminModelChannel = {
     id: string;
-    protocol: "openai" | "kie" | "mimo";
+    protocol: "openai" | "gemini" | "ark" | "kie" | "mimo";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -199,6 +199,7 @@ export type AdminModelCost = ModelCapabilityConfig;
 
 export type AdminPublicModelChannelInfo = {
     id: string;
+    protocol: "openai" | "gemini" | "ark" | "kie" | "mimo";
     name: string;
     baseUrl: string;
     models: string[];

@@ -990,9 +990,16 @@ export default function AdminSettingsPage() {
                                     <Select
                                         options={[
                                             { label: "OpenAI", value: "openai" },
+                                            { label: "Gemini", value: "gemini" },
+                                            { label: "火山方舟", value: "ark" },
                                             { label: "KIE", value: "kie" },
                                             { label: "MiMo", value: "mimo" },
                                         ]}
+                                        onChange={(protocol) => {
+                                            if (channelForm.getFieldValue("baseUrl")) return;
+                                            if (protocol === "gemini") channelForm.setFieldValue("baseUrl", "https://generativelanguage.googleapis.com");
+                                            if (protocol === "ark") channelForm.setFieldValue("baseUrl", "https://ark.cn-beijing.volces.com/api/v3");
+                                        }}
                                     />
                                 </Form.Item>
                             </Col>

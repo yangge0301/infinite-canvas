@@ -333,10 +333,19 @@ func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
 func BuildModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
 	lowerBaseURL := strings.ToLower(baseURL)
-	if !strings.HasSuffix(lowerBaseURL, "/v1") && !strings.HasSuffix(lowerBaseURL, "/api/v3") && !strings.HasSuffix(lowerBaseURL, "/api/plan/v3") {
+	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
+	if protocol == "gemini" {
+		if !strings.HasSuffix(lowerBaseURL, "/v1beta") {
+			baseURL += "/v1beta"
+		}
+	} else if !strings.HasSuffix(lowerBaseURL, "/v1") && !strings.HasSuffix(lowerBaseURL, "/api/v3") && !strings.HasSuffix(lowerBaseURL, "/api/plan/v3") {
 		baseURL += "/v1"
 	}
 	return baseURL + path
+}
+
+func isGeminiChannel(channel model.ModelChannel) bool {
+	return strings.EqualFold(strings.TrimSpace(channel.Protocol), "gemini")
 }
 
 func normalizeModelChannelBaseURL(baseURL string) string {
@@ -659,6 +668,36 @@ func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 		sort.Strings(result)
 		return result, nil
 	}
+	if isGeminiChannel(channel) {
+		request, err := http.NewRequest(http.MethodGet, BuildModelChannelURL(channel, "/models"), nil)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("x-goog-api-key", channel.APIKey)
+		response, err := adminModelHTTPClient.Do(request)
+		if err != nil {
+			return nil, safeMessageError{message: "读取模型失败：上游接口无响应或网络不可达"}
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		if response.StatusCode >= http.StatusBadRequest {
+			return nil, readAdminChannelError(body, response.StatusCode, "读取模型失败")
+		}
+		var payload struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		result := make([]string, 0, len(payload.Models))
+		for _, item := range payload.Models {
+			if name := strings.TrimSpace(strings.TrimPrefix(item.Name, "models/")); name != "" {
+				result = append(result, name)
+			}
+		}
+		sort.Strings(result)
+		return result, nil
+	}
 	request, err := http.NewRequest(http.MethodGet, BuildModelChannelURL(channel, "/models"), nil)
 	if err != nil {
 		return nil, err
@@ -821,6 +860,25 @@ func testAdminChannelModel(channel model.ModelChannel, modelName string) (string
 	}
 	if IsMiMoTTSModelName(modelName) {
 		return testMiMoTTSChannelModel(channel, modelName)
+	}
+	if isGeminiChannel(channel) {
+		body, _ := json.Marshal(map[string]any{"contents": []map[string]any{{"role": "user", "parts": []map[string]string{{"text": "hi"}}}}})
+		request, err := http.NewRequest(http.MethodPost, BuildModelChannelURL(channel, "/models/"+url.PathEscape(strings.TrimPrefix(modelName, "models/"))+":generateContent"), strings.NewReader(string(body)))
+		if err != nil {
+			return "", err
+		}
+		request.Header.Set("x-goog-api-key", channel.APIKey)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := adminModelHTTPClient.Do(request)
+		if err != nil {
+			return "", safeMessageError{message: "测试失败：上游接口无响应或网络不可达"}
+		}
+		defer response.Body.Close()
+		responseBody, _ := io.ReadAll(response.Body)
+		if response.StatusCode >= http.StatusBadRequest {
+			return "", readAdminChannelError(responseBody, response.StatusCode, "测试失败")
+		}
+		return "ok", nil
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model": modelName,
@@ -1105,6 +1163,7 @@ func publicChannelInfos(channels []model.ModelChannel) []model.PublicModelChanne
 		}
 		result = append(result, model.PublicModelChannelInfo{
 			ID:      channel.ID,
+			Protocol: channel.Protocol,
 			Name:    channel.Name,
 			BaseURL: channel.BaseURL,
 			Models:  append([]string{}, channel.Models...),

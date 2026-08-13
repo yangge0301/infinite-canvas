@@ -104,7 +104,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	setAIRequestAuthorization(request, channel)
 	copyAIResponse(w, request, channel, aiLogContext{StartedAt: startedAt, Endpoint: path, Method: http.MethodGet, Model: modelName, Channel: channel, UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), RequestBody: summarizeQueryParams(r.URL.Query())}, nil)
 }
 
@@ -127,6 +127,10 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
+	if isGeminiChannel(channel) && path == "/audio/speech" {
+		Fail(w, "Gemini 渠道暂不支持音频生成")
+		return
+	}
 	credits := 0
 	if userChannelID == "" {
 		credits, err = service.ModelCost(modelName)
@@ -138,7 +142,14 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
-	if service.IsMiMoTTSModelName(modelName) && path == "/audio/speech" {
+	if isGeminiChannel(channel) {
+		body, contentType, err = normalizeGeminiRequest(body, contentType, modelName, path)
+		if err != nil {
+			Fail(w, err.Error())
+			return
+		}
+		upstreamPath = geminiAPIPath(modelName)
+	} else if service.IsMiMoTTSModelName(modelName) && path == "/audio/speech" {
 		body, contentType, err = normalizeMiMoTTSBody(body, contentType, modelName)
 		if err != nil {
 			log.Printf("AI proxy normalize MiMo TTS request failed: model=%s err=%v", modelName, err)
@@ -173,7 +184,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	setAIRequestAuthorization(request, channel)
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -497,6 +508,14 @@ func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string
 	return service.BuildModelChannelURL(channel, path)
 }
 
+func setAIRequestAuthorization(request *http.Request, channel model.ModelChannel) {
+	if isGeminiChannel(channel) {
+		request.Header.Set("x-goog-api-key", channel.APIKey)
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+}
+
 func agnesVideoQueryID(modelName string, path string) (string, bool) {
 	if !isAgnesVideoModel(modelName) || !strings.HasPrefix(path, "/videos/") || strings.HasSuffix(path, "/content") {
 		return "", false
@@ -509,6 +528,9 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 }
 
 func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
+	if isGeminiChannel(channel) {
+		return geminiAPIPath(modelName)
+	}
 	if service.IsMiMoTTSModelName(modelName) && path == "/audio/speech" {
 		return "/chat/completions"
 	}

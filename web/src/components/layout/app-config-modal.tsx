@@ -10,7 +10,7 @@ import { clearStorageConfigCache as clearFileStorageCache } from "@/services/fil
 import { clearStorageConfigCache as clearImageStorageCache, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, loadStorageConfig, loadUserS3StorageProvider, loadUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider, type UserStorageProvider } from "@/services/image-storage";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoiceDesignModel, mimoTtsFormatOptions, mimoTtsVoiceOptions } from "@/lib/mimo-tts";
-import { filterModelsByCapability, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig, type LocalModelChannel, type ModelCapability } from "@/stores/use-config-store";
+import { defaultBaseUrlForChannelProtocol, filterModelsByCapability, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig, type LocalModelChannel, type ModelCapability } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 type ModelGroup = {
@@ -317,10 +317,15 @@ export function AppConfigModal() {
                                                 value={channel.protocol}
                                                 options={[
                                                     { label: "OpenAI", value: "openai" },
+                                                    { label: "Gemini", value: "gemini" },
+                                                    { label: "火山方舟", value: "ark" },
                                                     { label: "KIE", value: "kie" },
                                                     { label: "MiMo", value: "mimo" },
                                                 ]}
-                                                onChange={(protocol) => patchLocalChannel(channel.id, { protocol: protocol as LocalModelChannel["protocol"] })}
+                                                onChange={(protocol) => {
+                                                    const nextProtocol = protocol as LocalModelChannel["protocol"];
+                                                    patchLocalChannel(channel.id, { protocol: nextProtocol, baseUrl: channel.baseUrl.trim() ? channel.baseUrl : defaultBaseUrlForChannelProtocol(nextProtocol) });
+                                                }}
                                             />
                                             <Input value={channel.baseUrl} placeholder="Base URL" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
                                             <Input.Password value={channel.apiKey} placeholder="API Key" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />

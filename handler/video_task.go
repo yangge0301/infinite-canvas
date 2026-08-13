@@ -74,6 +74,10 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
+	if isGeminiChannel(channel) {
+		Fail(w, "Gemini 渠道暂不支持视频生成")
+		return
+	}
 	credits := 0
 	if userChannelID == "" {
 		costConfig, costErr := service.ModelCostConfig(modelName)
@@ -100,7 +104,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	setAIRequestAuthorization(request, channel)
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -291,7 +295,7 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	if err != nil {
 		return service.VideoTaskPollUpdate{}, err
 	}
-	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	setAIRequestAuthorization(request, channel)
 	startedAt := time.Now()
 	logContext := aiLogContext{
 		StartedAt:       startedAt,

@@ -11,7 +11,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
-    protocol: "openai" | "kie" | "mimo";
+    protocol: "openai" | "gemini" | "ark" | "kie" | "mimo";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -74,7 +74,7 @@ export type AiConfig = {
         workflowAgent: string;
     };
     localChannels: LocalModelChannel[];
-    publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
+    publicChannels: Array<{ id?: string; protocol?: LocalModelChannel["protocol"]; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
     syncStorageConfig: boolean;
     syncWebDAVStorageConfig: boolean;
     activeChannelId: string;
@@ -427,6 +427,31 @@ export function buildApiUrl(baseUrl: string, path: string) {
     return `${apiBaseUrl}${path}`;
 }
 
+export function defaultBaseUrlForChannelProtocol(protocol: LocalModelChannel["protocol"]) {
+    if (protocol === "gemini") return "https://generativelanguage.googleapis.com";
+    if (protocol === "ark") return "https://ark.cn-beijing.volces.com/api/v3";
+    return defaultConfig.baseUrl;
+}
+
+export function isGeminiChannelForConfig(config: AiConfig) {
+    const channelId = channelIdForActiveModel(config);
+    if (config.channelMode === "remote") return config.publicChannels.find((channel) => channel.id === channelId)?.protocol === "gemini";
+    return localChannelForActiveModel(config)?.protocol === "gemini";
+}
+
+export function isArkChannelForConfig(config: AiConfig) {
+    const channelId = channelIdForActiveModel(config);
+    if (config.channelMode === "remote") return config.publicChannels.find((channel) => channel.id === channelId)?.protocol === "ark";
+    return localChannelForActiveModel(config)?.protocol === "ark";
+}
+
+export function geminiApiUrl(baseUrl: string, model: string, action?: "generateContent" | "streamGenerateContent") {
+    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+    const apiBaseUrl = normalizedBaseUrl.toLowerCase().endsWith("/v1beta") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1beta`;
+    if (!action) return `${apiBaseUrl}/models`;
+    return `${apiBaseUrl}/models/${encodeURIComponent(model.trim().replace(/^models\//, ""))}:${action}`;
+}
+
 function normalizeArkPlanBaseUrl(baseUrl: string) {
     try {
         const url = new URL(baseUrl);
@@ -449,7 +474,7 @@ export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelCha
     const channels = Array.isArray(config.localChannels) ? config.localChannels : [];
     const normalized: LocalModelChannel[] = channels.map((channel, index) => ({
         id: channel.id || `local-${index + 1}`,
-        protocol: channel.protocol === "kie" || channel.protocol === "mimo" ? channel.protocol : "openai",
+        protocol: channel.protocol === "gemini" || channel.protocol === "ark" || channel.protocol === "kie" || channel.protocol === "mimo" ? channel.protocol : "openai",
         name: typeof channel.name === "string" ? channel.name : `本地渠道 ${index + 1}`,
         baseUrl: channel.baseUrl || "",
         apiKey: channel.apiKey || "",
