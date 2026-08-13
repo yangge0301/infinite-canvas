@@ -47,7 +47,8 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
             .map((input) => input.text)
             .filter(Boolean)
             .join("\n\n");
-    const referenceImages = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
+    const allReferenceImages = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
+    const referenceImages = sourceNode?.type === CanvasNodeType.Image ? allReferenceImages.slice(0, 16) : allReferenceImages;
     const referenceVideos = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
     const frameReferences = readFrameReferences(sourceNode, inputs);

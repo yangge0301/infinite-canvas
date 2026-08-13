@@ -51,7 +51,7 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasImageCandidatePicker } from "../components/canvas-image-candidate-picker";
 import { CanvasVideoCandidatePicker } from "../components/canvas-video-candidate-picker";
-import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasTextReference, type CanvasVideoFrameOption, type CanvasVideoReferenceKind, type CanvasVideoReferenceSlot } from "../components/canvas-node-prompt-panel";
+import { CanvasNodePromptPanel, type CanvasImageReference, type CanvasNodeGenerationMode, type CanvasTextReference, type CanvasVideoFrameOption, type CanvasVideoReferenceKind, type CanvasVideoReferenceSlot } from "../components/canvas-node-prompt-panel";
 import type { CanvasVideoResourceOption } from "../components/canvas-video-settings-popover";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab } from "../components/asset-picker-modal";
@@ -135,6 +135,7 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 
 function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata, nodeId?: string): CanvasNodeData {
     const spec = getNodeSpec(type);
+    const size = (type === CanvasNodeType.Image || type === CanvasNodeType.Video) && metadata?.size ? nodeSizeFromRatio(metadata.size, spec.width, spec.height) || spec : spec;
     const id = nodeId || `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     return {
@@ -142,11 +143,11 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         type,
         title: spec.title,
         position: {
-            x: position.x - spec.width / 2,
-            y: position.y - spec.height / 2,
+            x: position.x - size.width / 2,
+            y: position.y - size.height / 2,
         },
-        width: spec.width,
-        height: spec.height,
+        width: size.width,
+        height: size.height,
         metadata: { ...spec.metadata, ...metadata },
     };
 }
@@ -782,7 +783,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const generationMode = type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Image ? "image" : null;
+            const generationConfig = generationMode ? buildGenerationConfig(effectiveConfig, undefined, generationMode, modelCosts) : null;
+            const metadata = type === CanvasNodeType.Config
+                ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) }
+                : generationMode
+                    ? generationNodeMetadata(generationMode, generationConfig!)
+                    : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
@@ -797,7 +804,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setPendingConnectionCreate(null);
             setConnecting(null);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, setConnecting],
+        [effectiveConfig, message, modelCosts, setConnecting],
     );
 
     const cancelPendingConnectionCreate = useCallback(() => {
@@ -964,6 +971,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         });
         return map;
     }, [connections, nodeById]);
+    const imageReferencesByNodeId = useMemo(() => {
+        const map = new Map<string, CanvasImageReference[]>();
+        connections.forEach((connection) => {
+            const source = nodeById.get(connection.fromNodeId);
+            const target = nodeById.get(connection.toNodeId);
+            if (!isCanvasImageNodeType(source?.type) || target?.type !== CanvasNodeType.Image || !source.metadata?.content) return;
+            map.set(target.id, [...(map.get(target.id) || []), { connectionId: connection.id, nodeId: source.id, kind: "image", label: source.title || "图片节点", previewUrl: source.metadata.content }]);
+        });
+        return map;
+    }, [connections, nodeById]);
     const videoFrameOptionsByNodeId = useMemo(() => {
         const map = new Map<string, CanvasVideoFrameOption[]>();
         nodes.forEach((node) => {
@@ -1002,6 +1019,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position, textContent?: string, nodeId?: string) => {
             const targetPosition = position || getCanvasCenter();
+            const generationMode = type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Image ? "image" : null;
+            const generationConfig = generationMode ? buildGenerationConfig(effectiveConfig, undefined, generationMode, modelCosts) : null;
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -1009,7 +1028,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         size: effectiveConfig.size,
                         count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                     }
-                    : undefined;
+                    : generationMode
+                        ? generationNodeMetadata(generationMode, generationConfig!)
+                        : undefined;
             const newNode = createCanvasNode(
                 type,
                 targetPosition,
@@ -1024,7 +1045,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setSelectedConnectionId(null);
             if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.Director) setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
+        [effectiveConfig, getCanvasCenter, modelCosts],
     );
 
     const deleteCanvasTaskRecords = useCallback(
@@ -4102,6 +4123,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(panelNode.id) || []}
                                         onVideoReferenceUpload={handleVideoReferenceUpload}
                                         onVideoReferenceRemove={handleVideoReferenceRemove}
+                                        imageReferences={imageReferencesByNodeId.get(panelNode.id) || []}
+                                        onImageReferenceRemove={deleteConnection}
                                         textReferences={textReferencesByNodeId.get(panelNode.id) || []}
                                         onTextReferenceRemove={deleteConnection}
                                         onResourcePreview={(nodeId) => {
@@ -5662,6 +5685,15 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         mimoTtsFormat: node?.metadata?.mimoTtsFormat || config.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node?.metadata?.mimoVoiceDesignPrompt || config.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
         count: String(maxAllowedCount(node?.metadata?.count || (mode === "image" ? "1" : config.count) || defaultConfig.count, capability)),
+    };
+}
+
+function generationNodeMetadata(mode: "image" | "video", config: AiConfig): CanvasNodeMetadata {
+    return {
+        model: config.model,
+        channelId: mode === "video" ? config.videoChannelId || config.activeChannelId : config.imageChannelId || config.activeChannelId,
+        size: config.size,
+        ...(mode === "image" ? { quality: config.quality, count: Number(config.count) || 1 } : { seconds: config.videoSeconds, vquality: config.vquality, generateAudio: config.videoGenerateAudio }),
     };
 }
 
