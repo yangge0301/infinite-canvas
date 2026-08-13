@@ -30,6 +30,8 @@ export const audioVoiceOptions = ["alloy", "ash", "ballad", "coral", "echo", "fa
 export const audioFormatOptions = ["mp3", "wav", "opus"];
 export const audioSpeedOptions = ["0.75", "1", "1.25", "1.5", "1.75", "2"];
 
+const videoQualityHeights: Record<string, number> = { "480p": 480, "720p": 720, "768p": 768, "1080p": 1080, "2k": 2048, "4k": 4096 };
+
 export function inferModelType(model: string): ModelType {
     const value = model.toLowerCase();
     const normalized = value.replace(/[\s_]+/g, "-");
@@ -108,10 +110,18 @@ export function imageSizeForCapability(value: string, capability: ModelCapabilit
     return sizeForRatio(ratio, resolution);
 }
 
-export function videoSizeForCapability(value: string, capability: ModelCapabilityConfig) {
+export function videoSizeForCapability(value: string, capability: ModelCapabilityConfig, selectedQuality?: string) {
     const ratio = capabilityRatio(value, capability.ratios, "16:9");
-    const resolution = nearestAllowedResolution(value, capability.videoQualities, { "480p": 864, "720p": 1280, "768p": 1366, "1080p": 1920, "2k": 2560, "4k": 3840 }, "720p");
-    return sizeForRatio(ratio, resolution);
+    const quality = selectedQuality?.toLowerCase();
+    const resolution = quality && capability.videoQualities.includes(quality) ? videoQualityHeights[quality] : nearestAllowedResolution(value, capability.videoQualities, videoQualityHeights, "720p");
+    return videoSizeForRatio(ratio, resolution);
+}
+
+export function videoSizeForRatio(ratio: string, resolution: string | number) {
+    const [width, height] = ratio.split(":").map(Number);
+    const targetHeight = typeof resolution === "number" ? resolution : videoQualityHeights[resolution.toLowerCase()] || 720;
+    if (!width || !height || !targetHeight) return "1280x720";
+    return `${Math.round((targetHeight * width) / height)}x${targetHeight}`;
 }
 
 function capabilityRatio(value: string, ratios: string[], fallback: string) {

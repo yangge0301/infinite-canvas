@@ -3,7 +3,7 @@
 import { Input } from "antd";
 
 import type { CanvasTheme } from "@/lib/canvas-theme";
-import { firstAllowed, type ModelCapabilityConfig } from "@/lib/model-capabilities";
+import { firstAllowed, videoSizeForRatio, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import { normalizeSeedanceRatio } from "@/lib/seedance-video";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { CanvasNodeMetadata } from "../types";
@@ -69,7 +69,7 @@ export function CanvasNodeVideoSettingsPanel({ config, metadata, theme, audioSup
                                 type="button"
                                 className="flex min-h-[94px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl px-1 text-sm font-medium transition hover:opacity-90"
                                 style={{ background: selected ? theme.toolbar.activeBg : "transparent", color: selected ? theme.node.text : theme.node.muted }}
-                                onClick={() => onConfigChange("size", sizeForRatio(item.value, resolution))}
+                                onClick={() => onConfigChange("size", videoSizeForRatio(item.value, resolution))}
                             >
                                 <AspectIcon width={item.width} height={item.height} color={selected ? theme.node.text : theme.node.muted} />
                                 <span>{item.value}</span>
@@ -145,12 +145,4 @@ function normalizeResolution(value: string) {
     if (normalized === "2k") return "2k";
     if (normalized === "4k") return "4k";
     return "720p";
-}
-
-function sizeForRatio(ratio: string, resolution: string) {
-    const longEdge = { "480p": 864, "720p": 1280, "768p": 1366, "1080p": 1920, "2k": 2560, "4k": 3840 }[resolution] || 1280;
-    const [width, height] = ratio.split(":").map(Number);
-    if (!width || !height) return "1280x720";
-    if (width >= height) return `${longEdge}x${Math.max(16, Math.round((longEdge * height) / width / 16) * 16)}`;
-    return `${Math.max(16, Math.round((longEdge * width) / height / 16) * 16)}x${longEdge}`;
 }
