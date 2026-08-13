@@ -3204,13 +3204,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         try {
                             const created = await createVideoGenerationTask(videoGenerationConfig, requestPrompt, { references: videoReferenceImages, firstFrame, lastFrame, videoReferences: generationContext.referenceVideos, audioReferences: generationContext.referenceAudios }, undefined, { clientTaskId, source: "canvas", sourceId: nodeId });
                             setNodes((prev) => updateVideoCandidateTask(prev, nodeId, batchId, candidateId, created.task, videoGenerationConfig, generationStartedAt, spec));
-                            if (canvasVideoTaskFailed(created.task)) message.error(canvasVideoTaskError(created.task));
+                            if (canvasVideoTaskFailed(created.task)) {
+                                message.error(canvasVideoTaskError(created.task));
+                                return false;
+                            }
+                            return true;
                         } catch (error) {
                             const errorDetails = error instanceof Error ? error.message : "视频生成失败";
                             setNodes((prev) => updateVideoCandidateError(prev, nodeId, batchId, candidateId, errorDetails));
                             message.error(errorDetails);
+                            return false;
                         }
-                        return;
                     }
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
