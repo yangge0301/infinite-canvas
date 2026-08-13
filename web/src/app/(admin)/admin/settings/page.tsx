@@ -574,7 +574,7 @@ export default function AdminSettingsPage() {
                                                     title: "最长秒数",
                                                     dataIndex: "maxSeconds",
                                                     width: 120,
-                                                    render: (_, item: AdminModelCost) => item.type === "video" && !item.fixedDuration ? <InputNumber min={1} max={30} precision={0} value={item.maxSeconds} className="!w-full" addonAfter="s" onChange={(maxSeconds) => patchModelCost(form, setModelCosts, item, { maxSeconds: Number(maxSeconds) || 1 })} /> : "",
+                                                    render: (_, item: AdminModelCost) => item.type === "video" && !item.fixedDuration ? <Space.Compact className="!w-full"><InputNumber min={1} max={30} precision={0} value={item.maxSeconds} className="!w-full" onChange={(maxSeconds) => patchModelCost(form, setModelCosts, item, { maxSeconds: Number(maxSeconds) || 1 })} /><span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-2 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">s</span></Space.Compact> : "",
                                                 },
                                                 {
                                                     title: "画质",
