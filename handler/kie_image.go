@@ -1019,6 +1019,7 @@ func copyKIECreateImageResponse(w http.ResponseWriter, request *http.Request, pa
 		return true
 	}
 
+	imageURLs = persistGeneratedMediaURLs(imageURLs, "image/png", service.HTTPClientForChannel(channel), channel.BaseURL)
 	items := make([]map[string]any, 0, len(imageURLs))
 	for _, imageURL := range imageURLs {
 		items = append(items, map[string]any{"url": imageURL})

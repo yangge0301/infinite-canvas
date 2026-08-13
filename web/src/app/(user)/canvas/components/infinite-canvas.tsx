@@ -9,7 +9,11 @@ import type { ViewportTransform } from "../types";
 const canvasControlSelector = "[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
 
 function isCanvasControl(target: EventTarget | null) {
-    return target instanceof Element && Boolean(target.closest(canvasControlSelector));
+    if (!(target instanceof Element)) return false;
+    if (target.closest(".ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return true;
+    const video = target.closest("video");
+    if (video && video.closest("[data-node-id]")) return false;
+    return Boolean(target.closest(canvasControlSelector));
 }
 
 type InfiniteCanvasProps = {
@@ -198,8 +202,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             if (isCanvasControl(event.target)) return;
             event.preventDefault();
         };
-        container.addEventListener("wheel", preventWheelScroll, { passive: false });
-        return () => container.removeEventListener("wheel", preventWheelScroll);
+        container.addEventListener("wheel", preventWheelScroll, { passive: false, capture: true });
+        return () => container.removeEventListener("wheel", preventWheelScroll, { capture: true });
     }, [containerRef]);
 
     useEffect(() => {
@@ -225,13 +229,13 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             zoomAtPoint(factor, gesture.clientX ?? rect.left + rect.width / 2, gesture.clientY ?? rect.top + rect.height / 2);
         };
 
-        container.addEventListener("gesturestart", handleGestureStart, { passive: false });
-        container.addEventListener("gesturechange", handleGestureChange, { passive: false });
-        container.addEventListener("gestureend", preventBrowserGestureZoom, { passive: false });
+        container.addEventListener("gesturestart", handleGestureStart, { passive: false, capture: true });
+        container.addEventListener("gesturechange", handleGestureChange, { passive: false, capture: true });
+        container.addEventListener("gestureend", preventBrowserGestureZoom, { passive: false, capture: true });
         return () => {
-            container.removeEventListener("gesturestart", handleGestureStart);
-            container.removeEventListener("gesturechange", handleGestureChange);
-            container.removeEventListener("gestureend", preventBrowserGestureZoom);
+            container.removeEventListener("gesturestart", handleGestureStart, { capture: true });
+            container.removeEventListener("gesturechange", handleGestureChange, { capture: true });
+            container.removeEventListener("gestureend", preventBrowserGestureZoom, { capture: true });
         };
     }, [containerRef, onViewportChange]);
 
@@ -242,7 +246,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onDoubleClick={handleDoubleClick}
-            onWheel={handleWheel}
+            onWheelCapture={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}

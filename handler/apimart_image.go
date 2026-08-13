@@ -380,6 +380,7 @@ func readAPIMartDirectImageURLs(payload []byte) ([]string, bool) {
 }
 
 func writeAPIMartImagesResponse(w http.ResponseWriter, statusCode int, imageURLs []string, logContext aiLogContext) {
+	imageURLs = persistGeneratedMediaURLs(imageURLs, "image/png", service.HTTPClientForChannel(logContext.Channel), logContext.Channel.BaseURL)
 	items := make([]map[string]any, 0, len(imageURLs))
 	for _, imageURL := range imageURLs {
 		items = append(items, map[string]any{"url": imageURL})

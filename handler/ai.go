@@ -275,6 +275,32 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 			return
 		}
 	}
+	responseContentType := strings.ToLower(response.Header.Get("Content-Type"))
+	if isImageGenerationEndpoint(logContext.Endpoint) && strings.HasPrefix(responseContentType, "image/") {
+		payload, _ := io.ReadAll(io.LimitReader(response.Body, generatedMediaMaxBytes+1))
+		if localURL, mimeType, bytes, persistErr := storeGeneratedMedia(payload, responseContentType); persistErr == nil {
+			converted, _ := json.Marshal(map[string]any{"created": time.Now().Unix(), "data": []map[string]any{{"url": localURL, "mimeType": mimeType, "bytes": bytes}}})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(response.StatusCode)
+			_, _ = w.Write(converted)
+			saveAIProxyLog(logContext, response.StatusCode, string(converted), "")
+			return
+		}
+	}
+	if isImageGenerationEndpoint(logContext.Endpoint) && (responseContentType == "" || strings.Contains(responseContentType, "json")) {
+		payload, _ := io.ReadAll(response.Body)
+		if transformed, ok := persistGeneratedImageResponse(payload, service.HTTPClientForChannel(channel), channel.BaseURL); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(response.StatusCode)
+			_, _ = w.Write(transformed)
+			saveAIProxyLog(logContext, response.StatusCode, string(transformed), "")
+			return
+		}
+		w.WriteHeader(response.StatusCode)
+		_, _ = w.Write(payload)
+		saveAIProxyLog(logContext, response.StatusCode, string(payload), "")
+		return
+	}
 
 	for key, values := range response.Header {
 		if strings.EqualFold(key, "Content-Length") {
@@ -287,6 +313,10 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 	w.WriteHeader(response.StatusCode)
 	responseBody := copyAIResponseBody(w, response.Body)
 	saveAIProxyLog(logContext, response.StatusCode, responseBody, "")
+}
+
+func isImageGenerationEndpoint(endpoint string) bool {
+	return endpoint == "/images/generations" || endpoint == "/images/edits"
 }
 
 func copyAIResponseBody(w http.ResponseWriter, body io.Reader) string {

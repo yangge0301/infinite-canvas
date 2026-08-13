@@ -274,13 +274,27 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 		saveFailedCanvasImageTask(task, err.Error(), string(payload))
 		return
 	}
+	persistedURLs := make([]string, 0, len(imageURLs))
+	for _, imageURL := range imageURLs {
+		localURL, persistedMime, persistedBytes, persistErr := persistGeneratedMediaURL(imageURL, mimeType, nil, "")
+		if persistErr != nil {
+			log.Printf("persist canvas image failed: task=%s url=%s err=%v", task.ID, imageURL, persistErr)
+			persistedURLs = append(persistedURLs, imageURL)
+			continue
+		}
+		persistedURLs = append(persistedURLs, localURL)
+		if len(persistedURLs) == 1 {
+			mimeType = persistedMime
+			bytes = persistedBytes
+		}
+	}
 	task.Status = "completed"
 	task.Progress = 100
 	task.CompletedAt = taskTime()
 	task.ResponseBody = string(payload)
-	task.ImageURL = imageURLs[0]
+	task.ImageURL = persistedURLs[0]
 	if collectAll {
-		task.ImageURLs = imageURLs
+		task.ImageURLs = persistedURLs
 	}
 	task.StorageKey = ""
 	task.MimeType = mimeType

@@ -7,6 +7,7 @@ import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, geminiApiUrl, isArkChannelForConfig, isGeminiChannelForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { persistGeneratedMediaResults } from "@/services/api/generated-media";
 import type { ReferenceImage } from "@/types/image";
 import { nanoid } from "nanoid";
 
@@ -980,6 +981,7 @@ async function requestAndParseImages(config: AiConfig, endpoint: string, request
             throw new ImageRequestError(error.message, error.detail);
         }
         const parsed = await parseResponse(response);
+        parsed.images = await persistGeneratedMediaResults(parsed.images);
         logged = true;
         void writeLocalAICallLog(config, endpoint, startedAt, response.status, timeoutSeconds, stringifyLogPayload(requestBody), parsed.responseBody, "");
         return parsed.images;
@@ -1021,7 +1023,7 @@ async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?
 
 export async function requestGeneration(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string) {
     try {
-        const images = await requestImages(config, prompt, []);
+        const images = await persistGeneratedMediaResults(await requestImages(config, prompt, []));
         refreshRemoteUser(config);
         return images;
     } catch (error) {
@@ -1032,7 +1034,7 @@ export async function requestGeneration(config: AiConfig & { seedIndex?: number;
 
 export async function requestEdit(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[]) {
     try {
-        const images = await requestImages(config, prompt, references);
+        const images = await persistGeneratedMediaResults(await requestImages(config, prompt, references));
         refreshRemoteUser(config);
         return images;
     } catch (error) {
@@ -1043,7 +1045,7 @@ export async function requestEdit(config: AiConfig & { seedIndex?: number; seedC
 
 export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}): Promise<CanvasImageTask> {
     if (!usesAccountProxy(config)) {
-        const images = await requestImages({ ...config, count: "1" }, prompt, references);
+        const images = await persistGeneratedMediaResults(await requestImages({ ...config, count: "1" }, prompt, references));
         const [image] = images;
         if (!image) throw new Error("接口没有返回图片");
         return {

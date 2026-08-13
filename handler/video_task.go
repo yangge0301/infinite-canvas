@@ -171,6 +171,17 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, "视频接口没有返回任务 ID")
 		return
 	}
+	if parsed.VideoURL != "" {
+		headers := http.Header{}
+		if isPrivateVideoProtocol(channel) {
+			headers.Set("Authorization", "Bearer "+channel.APIKey)
+		}
+		if localURL, _, _, persistErr := persistGeneratedMediaURLWithHeaders(parsed.VideoURL, "video/mp4", service.HTTPClientForChannel(channel), channel.BaseURL, headers); persistErr == nil {
+			parsed.VideoURL = localURL
+		} else {
+			log.Printf("persist video result failed: model=%s url=%s err=%v", modelName, parsed.VideoURL, persistErr)
+		}
+	}
 	task, err := service.CreateVideoTask(service.VideoTaskCreateInput{
 		UserID:          user.ID,
 		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
@@ -336,8 +347,20 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	}
 	transformed := transformVideoStatusPayload(payload, request, channel, task.Model)
 	parsed := parseVideoTaskPayload(transformed, task.Model)
-	if isPrivateVideoProtocol(channel) && (strings.HasPrefix(parsed.VideoURL, "/") || strings.Contains(parsed.VideoURL, "/v1/videos/") && strings.Contains(parsed.VideoURL, "/content")) {
-		parsed.VideoURL = fmt.Sprintf("/api/v1/videos/%s/content?model=%s", url.PathEscape(pollID), url.QueryEscape(task.Model))
+	upstreamVideoURL := parsed.VideoURL
+	if upstreamVideoURL != "" && !strings.HasPrefix(upstreamVideoURL, "/api/media/generated/") {
+		headers := http.Header{}
+		if isPrivateVideoProtocol(channel) {
+			headers.Set("Authorization", "Bearer "+channel.APIKey)
+		}
+		if localURL, _, _, persistErr := persistGeneratedMediaURLWithHeaders(upstreamVideoURL, "video/mp4", service.HTTPClientForChannel(channel), channel.BaseURL, headers); persistErr == nil {
+			parsed.VideoURL = localURL
+		} else {
+			log.Printf("persist polled video result failed: task=%s url=%s err=%v", task.ID, upstreamVideoURL, persistErr)
+			if isPrivateVideoProtocol(channel) && (strings.HasPrefix(upstreamVideoURL, "/") || strings.Contains(upstreamVideoURL, "/v1/videos/") && strings.Contains(upstreamVideoURL, "/content")) {
+				parsed.VideoURL = fmt.Sprintf("/api/v1/videos/%s/content?model=%s", url.PathEscape(pollID), url.QueryEscape(task.Model))
+			}
+		}
 	}
 	if parsed.Status == "failed" && parsed.Error == "" {
 		parsed.Error = firstNonEmpty(parsed.ErrorDetail, "视频任务生成失败")

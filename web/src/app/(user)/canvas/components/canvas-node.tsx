@@ -55,6 +55,7 @@ type CanvasNodeProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
+    onViewMedia?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -76,6 +77,7 @@ type NodeContentRendererProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
+    onViewMedia?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     onOpenCandidatePicker?: () => void;
@@ -121,6 +123,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onRetry,
     onGenerateImage,
     onViewImage,
+    onViewMedia,
     onContextMenu,
 }: CanvasNodeProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -370,6 +373,12 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onViewImage?.(data);
                         return;
                     }
+                    if (data.type === CanvasNodeType.Video && hasVideoContent) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onViewMedia?.(data);
+                        return;
+                    }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
@@ -407,6 +416,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onRetry={onRetry}
                             onGenerateImage={onGenerateImage}
                             onViewImage={onViewImage}
+                            onViewMedia={onViewMedia}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                             onOpenCandidatePicker={() => onOpenCandidatePicker?.(data)}
@@ -812,7 +822,15 @@ function VideoContent({ node, theme, onOpenCandidatePicker }: { node: CanvasNode
 
     return (
         <div className="relative h-full w-full overflow-hidden rounded-3xl">
-            <video src={node.metadata?.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />
+            <video
+                src={node.metadata?.content}
+                controls
+                className="h-full w-full rounded-[18px] bg-black object-contain"
+                data-canvas-no-zoom
+                onDoubleClick={(event) => {
+                    event.preventDefault();
+                }}
+            />
             {isGeneratingCandidates ? <VideoGenerationOverlay node={node} theme={theme} /> : null}
             {successfulCandidateBatchCount > 1 ? (
                 <button

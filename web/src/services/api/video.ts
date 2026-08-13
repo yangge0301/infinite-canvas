@@ -7,6 +7,7 @@ import { configuredModelCapability } from "@/lib/model-capabilities";
 import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { uploadTemporaryReferenceFiles } from "@/services/api/reference-upload";
+import { persistGeneratedMedia } from "@/services/api/generated-media";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
 import { useConfigStore } from "@/stores/use-config-store";
@@ -141,7 +142,13 @@ export async function pollCreatedVideoGenerationTask(config: AiConfig, task: Vid
         }
         const videoUrl = completed?.video_url || completed?.url || "";
         if (!videoUrl) throw new VideoRequestError("视频生成完成但没有返回视频地址", completed);
-        const result = buildVideoGenerationResult(completed, videoUrl, Date.now() - startedAt);
+        let persistedVideoURL = videoUrl;
+        try {
+            persistedVideoURL = (await persistGeneratedMedia(videoUrl, "video/mp4")).url || videoUrl;
+        } catch {
+            persistedVideoURL = videoUrl;
+        }
+        const result = buildVideoGenerationResult(completed, persistedVideoURL, Date.now() - startedAt);
         void writeVideoAICallLog(config, model, "/videos", "POST", startedAt, 200, stringifyLogPayload(requestBody ? summarizeVideoRequestBody(requestBody) : { taskId: pollId }), stringifyLogPayload({ task: completed, video: result }), "");
         refreshRemoteUser(config);
         return result;

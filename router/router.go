@@ -29,6 +29,13 @@ func New() *gin.Engine {
 	api.HEAD("/media/references/:id", func(c *gin.Context) {
 		handler.ReferenceMedia(c.Writer, c.Request, c.Param("id"))
 	})
+	api.GET("/media/generated/:id", func(c *gin.Context) {
+		handler.GeneratedMedia(c.Writer, c.Request, c.Param("id"))
+	})
+	api.HEAD("/media/generated/:id", func(c *gin.Context) {
+		handler.GeneratedMedia(c.Writer, c.Request, c.Param("id"))
+	})
+	api.POST("/media/generated", gin.WrapF(handler.PersistGeneratedMedia))
 	api.GET("/files/:id", func(c *gin.Context) {
 		handler.FileInfo(c.Writer, c.Request, c.Param("id"))
 	})

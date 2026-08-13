@@ -4206,6 +4206,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onRetry={(node) => void handleRetryNode(node)}
                             onGenerateImage={generateImageFromTextNode}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
+                            onViewMedia={(node) => setMediaPreviewNodeId(node.id)}
                             onContextMenu={(event, id) => {
                                 event.preventDefault();
                                 event.stopPropagation();
