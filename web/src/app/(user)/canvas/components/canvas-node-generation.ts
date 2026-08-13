@@ -4,7 +4,7 @@ import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import type { VideoElementItem, VideoElementReference, VideoMultiPromptItem } from "@/stores/use-config-store";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasVideoInputMode } from "../types";
 import { isCanvasImageNodeType } from "../utils/canvas-panorama";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
 
@@ -39,6 +39,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt, sourceNode);
     }
+    if (sourceNode?.type === CanvasNodeType.Video && sourceNode.metadata?.videoInputMode) return buildVideoInputModeGenerationContext(sourceNode, inputs, prompt);
 
     const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
     const upstreamText = sourceNode?.metadata?.excludeUpstreamText? "": inputs
@@ -67,6 +68,42 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
     };
+}
+
+function buildVideoInputModeGenerationContext(sourceNode: CanvasNodeData, inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
+    const mode: CanvasVideoInputMode = sourceNode.metadata?.videoInputMode || "text-to-video";
+    const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
+    const references = (sourceNode.metadata?.videoReferenceNodeIds || []).map((nodeId) => inputByNodeId.get(nodeId)).filter((input): input is NodeGenerationInput => Boolean(input));
+    const base = {
+        prompt,
+        videoMultiPrompt: [],
+        videoElementList: [],
+        textCount: 0,
+        imageCount: 0,
+        videoCount: 0,
+        audioCount: 0,
+    };
+
+    if (mode === "image-to-video") {
+        const image = references.find((input) => input.image)?.image;
+        return { ...base, referenceImages: image ? [image] : [], firstFrame: null, lastFrame: null, referenceVideos: [], referenceAudios: [], imageCount: image ? 1 : 0 };
+    }
+    if (mode === "first-last-frame") {
+        const firstFrame = sourceNode.metadata?.firstFrameNodeId ? inputByNodeId.get(sourceNode.metadata.firstFrameNodeId)?.image || null : null;
+        const lastFrame = sourceNode.metadata?.lastFrameNodeId ? inputByNodeId.get(sourceNode.metadata.lastFrameNodeId)?.image || null : null;
+        return { ...base, referenceImages: [], firstFrame, lastFrame, referenceVideos: [], referenceAudios: [], imageCount: Number(Boolean(firstFrame)) + Number(Boolean(lastFrame)) };
+    }
+    if (mode === "all-reference") {
+        const referenceImages = references.flatMap((input) => input.image ? [input.image] : []).slice(0, 9);
+        const referenceVideos = references.flatMap((input) => input.video ? [input.video] : []).slice(0, 3);
+        const referenceAudios = references.flatMap((input) => input.audio ? [input.audio] : []).slice(0, 3);
+        return { ...base, referenceImages, firstFrame: null, lastFrame: null, referenceVideos, referenceAudios, imageCount: referenceImages.length, videoCount: referenceVideos.length, audioCount: referenceAudios.length };
+    }
+    if (mode === "video-continuation") {
+        const video = references.find((input) => input.video)?.video;
+        return { ...base, referenceImages: [], firstFrame: null, lastFrame: null, referenceVideos: video ? [video] : [], referenceAudios: [], videoCount: video ? 1 : 0 };
+    }
+    return { ...base, referenceImages: [], firstFrame: null, lastFrame: null, referenceVideos: [], referenceAudios: [] };
 }
 
 function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, sourceNode?: CanvasNodeData): NodeGenerationContext {

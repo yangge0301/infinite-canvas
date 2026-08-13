@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUp, LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUp, Image as ImageIcon, LoaderCircle, Music2, Plus, Video, X } from "lucide-react";
 import { Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -16,13 +16,15 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
 import { CanvasVideoSettingsPopover, type CanvasVideoFrameOption, type CanvasVideoResourceOption } from "./canvas-video-settings-popover";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
+import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type CanvasVideoInputMode } from "../types";
 import { PANORAMA_IMAGE_SIZE, isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 export type { CanvasVideoFrameOption };
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
+export type CanvasVideoReferenceKind = "image" | "video" | "audio";
+export type CanvasVideoReferenceSlot = "reference" | "firstFrame" | "lastFrame";
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
@@ -33,13 +35,15 @@ type CanvasNodePromptPanelProps = {
     mentionReferences?: CanvasResourceReference[];
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
+    onVideoReferenceUpload?: (nodeId: string, mode: CanvasVideoInputMode, kind: CanvasVideoReferenceKind, slot: CanvasVideoReferenceSlot, file: File) => Promise<void>;
+    onVideoReferenceRemove?: (nodeId: string, slot: CanvasVideoReferenceSlot, resourceNodeId: string) => void;
     canvasScale?: number;
     positionVersion?: string;
     onImageSettingsOpenChange?: (open: boolean) => void;
     onPromptFocus?: () => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onVideoReferenceUpload, onVideoReferenceRemove, canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -86,6 +90,16 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
+            {mode === "video" ? (
+                <CanvasVideoInputModes
+                    node={node}
+                    options={videoResourceOptions}
+                    theme={theme}
+                    onModeChange={(videoInputMode) => onConfigChange(node.id, { videoInputMode, videoReferenceNodeIds: undefined, firstFrameNodeId: undefined, lastFrameNodeId: undefined })}
+                    onUpload={onVideoReferenceUpload}
+                    onRemove={onVideoReferenceRemove}
+                />
+            ) : null}
             <CanvasPromptChipInput
                 value={prompt}
                 references={mentionReferences}
@@ -153,6 +167,75 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </div>
         </div>
     );
+}
+
+const VIDEO_INPUT_MODE_OPTIONS: Array<{ value: CanvasVideoInputMode; label: string }> = [
+    { value: "text-to-video", label: "文生视频" },
+    { value: "image-to-video", label: "图生视频" },
+    { value: "first-last-frame", label: "首尾帧" },
+    { value: "all-reference", label: "全能参考" },
+    { value: "video-continuation", label: "视频续写" },
+];
+
+function CanvasVideoInputModes({ node, options, theme, onModeChange, onUpload, onRemove }: { node: CanvasNodeData; options: CanvasVideoResourceOption[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onModeChange: (mode: CanvasVideoInputMode) => void; onUpload?: CanvasNodePromptPanelProps["onVideoReferenceUpload"]; onRemove?: CanvasNodePromptPanelProps["onVideoReferenceRemove"] }) {
+    const uploadInputRef = useRef<HTMLInputElement>(null);
+    const [uploadTarget, setUploadTarget] = useState<{ kind: CanvasVideoReferenceKind; slot: CanvasVideoReferenceSlot } | null>(null);
+    const mode = node.metadata?.videoInputMode || "text-to-video";
+    const optionByNodeId = new Map(options.map((option) => [option.nodeId, option]));
+    const referenceIds = node.metadata?.videoReferenceNodeIds || [];
+    const references = (kind: CanvasVideoReferenceKind, limit: number) => referenceIds.map((id) => optionByNodeId.get(id)).filter((option): option is CanvasVideoResourceOption => option?.kind === kind).slice(0, limit);
+    const selectUpload = (kind: CanvasVideoReferenceKind, slot: CanvasVideoReferenceSlot = "reference") => {
+        if (!onUpload) return;
+        setUploadTarget({ kind, slot });
+        uploadInputRef.current?.click();
+    };
+    const uploadFile = async (file?: File) => {
+        if (!file || !uploadTarget || !onUpload) return;
+        await onUpload(node.id, mode, uploadTarget.kind, uploadTarget.slot, file);
+        setUploadTarget(null);
+    };
+
+    const imageReference = references("image", 1)[0];
+    const continuationReference = references("video", 1)[0];
+    const firstFrame = node.metadata?.firstFrameNodeId ? optionByNodeId.get(node.metadata.firstFrameNodeId) : undefined;
+    const lastFrame = node.metadata?.lastFrameNodeId ? optionByNodeId.get(node.metadata.lastFrameNodeId) : undefined;
+
+    return (
+        <div className="mb-2 border-b pb-2" style={{ borderColor: theme.toolbar.border }}>
+            <div className="flex flex-wrap gap-1.5">
+                {VIDEO_INPUT_MODE_OPTIONS.map((option) => {
+                    const selected = mode === option.value;
+                    return <button key={option.value} type="button" className="h-7 rounded-md border px-2 text-xs transition-colors" style={{ borderColor: selected ? theme.node.stroke : theme.toolbar.border, background: selected ? theme.node.fill : "transparent", color: selected ? theme.node.text : theme.node.muted }} onClick={() => onModeChange(option.value)}>{option.label}</button>;
+                })}
+            </div>
+            {mode === "image-to-video" ? <VideoReferenceSection label="参考图片" theme={theme}><VideoReferenceTile option={imageReference} kind="image" theme={theme} onAdd={() => selectUpload("image")} onRemove={() => imageReference && onRemove?.(node.id, "reference", imageReference.nodeId)} /></VideoReferenceSection> : null}
+            {mode === "first-last-frame" ? <VideoReferenceSection label="首尾帧" theme={theme}><VideoReferenceTile option={firstFrame?.kind === "image" ? firstFrame : undefined} kind="image" label="首帧" theme={theme} onAdd={() => selectUpload("image", "firstFrame")} onRemove={() => firstFrame && onRemove?.(node.id, "firstFrame", firstFrame.nodeId)} /><VideoReferenceTile option={lastFrame?.kind === "image" ? lastFrame : undefined} kind="image" label="尾帧" theme={theme} onAdd={() => selectUpload("image", "lastFrame")} onRemove={() => lastFrame && onRemove?.(node.id, "lastFrame", lastFrame.nodeId)} /></VideoReferenceSection> : null}
+            {mode === "all-reference" ? <>
+                <VideoReferenceSection label="图片 · 最多 9 张" theme={theme}><VideoReferenceTiles options={references("image", 9)} kind="image" limit={9} theme={theme} onAdd={() => selectUpload("image")} onRemove={(id) => onRemove?.(node.id, "reference", id)} /></VideoReferenceSection>
+                <VideoReferenceSection label="视频 · 最多 3 个" theme={theme}><VideoReferenceTiles options={references("video", 3)} kind="video" limit={3} theme={theme} onAdd={() => selectUpload("video")} onRemove={(id) => onRemove?.(node.id, "reference", id)} /></VideoReferenceSection>
+                <VideoReferenceSection label="音频 · 最多 3 个" theme={theme}><VideoReferenceTiles options={references("audio", 3)} kind="audio" limit={3} theme={theme} onAdd={() => selectUpload("audio")} onRemove={(id) => onRemove?.(node.id, "reference", id)} /></VideoReferenceSection>
+            </> : null}
+            {mode === "video-continuation" ? <VideoReferenceSection label="续写视频" theme={theme}><VideoReferenceTile option={continuationReference} kind="video" theme={theme} onAdd={() => selectUpload("video")} onRemove={() => continuationReference && onRemove?.(node.id, "reference", continuationReference.nodeId)} /></VideoReferenceSection> : null}
+            <input ref={uploadInputRef} className="hidden" type="file" accept={uploadTarget?.kind === "image" ? "image/*" : uploadTarget?.kind === "video" ? "video/*" : "audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"} onChange={(event) => { void uploadFile(event.target.files?.[0]); event.target.value = ""; }} />
+        </div>
+    );
+}
+
+function VideoReferenceSection({ label, theme, children }: { label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; children: ReactNode }) {
+    return <div className="mt-2 flex min-w-0 items-center gap-2"><span className="w-[88px] shrink-0 text-xs" style={{ color: theme.node.muted }}>{label}</span><div className="flex min-w-0 flex-wrap gap-1.5">{children}</div></div>;
+}
+
+function VideoReferenceTiles({ options, kind, limit, theme, onAdd, onRemove }: { options: CanvasVideoResourceOption[]; kind: CanvasVideoReferenceKind; limit: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onAdd: () => void; onRemove: (id: string) => void }) {
+    return <>{options.map((option) => <VideoReferenceTile key={option.nodeId} option={option} kind={kind} theme={theme} onRemove={() => onRemove(option.nodeId)} />)}{options.length < limit ? <VideoReferenceTile kind={kind} theme={theme} onAdd={onAdd} /> : null}</>;
+}
+
+function VideoReferenceTile({ option, kind, label, theme, onAdd, onRemove }: { option?: CanvasVideoResourceOption; kind: CanvasVideoReferenceKind; label?: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onAdd?: () => void; onRemove?: () => void }) {
+    const Icon = kind === "image" ? ImageIcon : kind === "video" ? Video : Music2;
+    if (!option) return <button type="button" title={label ? `上传${label}` : `上传${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}`} aria-label={label ? `上传${label}` : "上传参考素材"} className="flex size-12 shrink-0 flex-col items-center justify-center rounded-md border border-dashed transition-colors" style={{ borderColor: theme.node.stroke, color: theme.node.muted }} onClick={onAdd}><Plus className="size-4" /><Icon className="mt-0.5 size-3" /></button>;
+    return <div className="group relative size-12 shrink-0 overflow-hidden rounded-md border" style={{ borderColor: theme.node.stroke, background: theme.node.fill }} title={option.label}>
+        {kind === "image" && option.previewUrl ? <img src={option.previewUrl} alt={option.label} className="size-full object-cover" /> : <div className="flex size-full flex-col items-center justify-center gap-0.5" style={{ color: theme.node.muted }}><Icon className="size-4" /><span className="max-w-full truncate px-1 text-[10px]">{label || option.label}</span></div>}
+        <button type="button" title="移除参考素材" aria-label="移除参考素材" className="absolute right-0.5 top-0.5 hidden size-4 items-center justify-center rounded-sm group-hover:flex" style={{ background: theme.toolbar.panel, color: theme.node.text }} onClick={onRemove}><X className="size-3" /></button>
+    </div>;
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {

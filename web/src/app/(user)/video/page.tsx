@@ -16,7 +16,7 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
+import { modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { deleteStoredMedia, downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { deleteVideoGenerationLogs, fetchVideoGenerationLogs, saveVideoGenerationLogs } from "@/services/api/generation-logs";
@@ -94,15 +94,6 @@ type GenerationLogConfig = Pick<AiConfig, "channelMode" | "activeChannelId" | "v
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 type WorkbenchLayout = "side" | "bottom";
 type AssetPickerTarget = "general" | "image" | "video" | "audio" | "firstFrame" | "lastFrame" | "element";
-type VideoInputMode = "text-to-video" | "image-to-video" | "first-last-frame" | "all-reference" | "video-continuation";
-
-const videoInputModeOptions: Array<{ value: VideoInputMode; label: string }> = [
-    { value: "text-to-video", label: "文生视频" },
-    { value: "image-to-video", label: "图生视频" },
-    { value: "first-last-frame", label: "首尾帧" },
-    { value: "all-reference", label: "全能参考" },
-    { value: "video-continuation", label: "视频续写" },
-];
 
 const WORKBENCH_LAYOUT_KEY = "infinite-canvas:video-workbench-layout";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
@@ -148,7 +139,6 @@ export default function VideoPage() {
     const [lastFrame, setLastFrame] = useState<ReferenceImage | null>(null);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
-    const [inputMode, setInputMode] = useState<VideoInputMode>("text-to-video");
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
@@ -178,36 +168,6 @@ export default function VideoPage() {
     const isKlingWorkbench = Boolean(klingWorkbench);
     const pendingLogCount = logs.filter((log) => log.status === "生成中" && log.task && !log.video).length;
     const usesBackendVideoTasks = (value: AiConfig) => value.channelMode === "remote" || (value.channelMode === "local" && Boolean(token));
-
-    const applyInputMode = (nextMode: VideoInputMode) => {
-        setInputMode(nextMode);
-        if (nextMode === "text-to-video") {
-            setReferences([]);
-            setFirstFrame(null);
-            setLastFrame(null);
-            setVideoReferences([]);
-            setAudioReferences([]);
-        } else if (nextMode === "image-to-video") {
-            setReferences((value) => value.slice(0, 1));
-            setFirstFrame(null);
-            setLastFrame(null);
-            setVideoReferences([]);
-            setAudioReferences([]);
-        } else if (nextMode === "first-last-frame") {
-            setReferences([]);
-            setVideoReferences([]);
-            setAudioReferences([]);
-        } else if (nextMode === "video-continuation") {
-            setReferences([]);
-            setFirstFrame(null);
-            setLastFrame(null);
-            setVideoReferences((value) => value.slice(0, 1));
-            setAudioReferences([]);
-        } else {
-            setFirstFrame(null);
-            setLastFrame(null);
-        }
-    };
 
     const restorePendingLogResults = (sourceLogs: GenerationLog[]) => {
         const pendingLogs = sourceLogs.filter((log) => log.status === "生成中" && log.task && !log.video);
@@ -369,14 +329,12 @@ export default function VideoPage() {
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
-        const referenceImageLimit = isKlingWorkbench ? 2 : inputMode === "image-to-video" ? 1 : inputMode === "all-reference" ? 9 : 0;
-        const referenceVideoLimit = inputMode === "video-continuation" ? 1 : inputMode === "all-reference" ? 3 : 0;
-        const referenceAudioLimit = inputMode === "all-reference" ? 3 : 0;
+        const referenceImageLimit = isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images;
         const unsupported = isKlingWorkbench ? selectedFiles.filter((file) => !file.type.startsWith("image/")) : selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
         if (unsupported.length) message.warning(isKlingWorkbench ? "当前 Kling 仅支持参考图" : "已忽略不支持的参考素材，请使用图片、mp4/mov 视频或 mp3/wav 音频");
         const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, Math.max(0, referenceImageLimit - references.length));
-        const videoFiles = isKlingWorkbench ? [] : selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, Math.max(0, referenceVideoLimit - videoReferences.length));
-        const audioFiles = isKlingWorkbench ? [] : selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, Math.max(0, referenceAudioLimit - audioReferences.length));
+        const videoFiles = isKlingWorkbench ? [] : selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
+        const audioFiles = isKlingWorkbench ? [] : selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
         if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) message.warning("已忽略超过 30MB 的参考图");
         if (selectedFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
         if (selectedFiles.some((file) => isSupportedAudioFile(file) && file.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
@@ -405,8 +363,8 @@ export default function VideoPage() {
                 message.warning,
             );
             setReferences((value) => [...value, ...nextReferences].slice(0, referenceImageLimit));
-            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, referenceVideoLimit));
-            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, referenceAudioLimit));
+            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
             if (nextReferences.length) message.success(`已上传 ${nextReferences.length} 张参考图`);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "参考素材上传失败");
@@ -472,14 +430,13 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
-            const imageLimit = isKlingWorkbench ? 2 : inputMode === "image-to-video" ? 1 : inputMode === "all-reference" ? 9 : 0;
             const nextReferences = await Promise.all(
-                blobs.slice(0, Math.max(0, imageLimit - references.length)).map(async (blob, index) => {
+                blobs.slice(0, Math.max(0, (isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images) - references.length)).map(async (blob, index) => {
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, imageLimit));
+            setReferences((value) => [...value, ...nextReferences].slice(0, isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images));
             message.success(`已读取 ${nextReferences.length} 张参考图`);
         } catch {
             message.error("剪切板里没有可读取的图片");
@@ -521,8 +478,7 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的视频");
                 return;
             }
-            const videoLimit = inputMode === "video-continuation" ? 1 : inputMode === "all-reference" ? 3 : 0;
-            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, Math.max(0, videoLimit - videoReferences.length));
+            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
             if (blobs.some((blob) => blob.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
             const nextVideoReferences = await Promise.all(
                 usable.map(async (blob, index) => {
@@ -530,7 +486,7 @@ export default function VideoPage() {
                     return { id: nanoid(), name: `clipboard-video-${index + 1}.mp4`, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs };
                 }),
             );
-            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, videoLimit));
+            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
             message.success(`已读取 ${nextVideoReferences.length} 个参考视频`);
         } catch {
             message.error("剪切板里没有可读取的视频");
@@ -545,8 +501,7 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的音频");
                 return;
             }
-            const audioLimit = inputMode === "all-reference" ? 3 : 0;
-            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, Math.max(0, audioLimit - audioReferences.length));
+            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
             if (blobs.some((blob) => blob.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
             const nextAudioReferences = filterAudioReferencesByDuration(
                 audioReferences,
@@ -558,7 +513,7 @@ export default function VideoPage() {
                 ),
                 message.warning,
             );
-            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, audioLimit));
+            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
             message.success(`已读取 ${nextAudioReferences.length} 个参考音频`);
         } catch {
             message.error("剪切板里没有可读取的音频");
@@ -631,13 +586,7 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        const effectiveInputMode: VideoInputMode = isKlingWorkbench ? "image-to-video" : inputMode;
-        const activeReferences = effectiveInputMode === "image-to-video" ? referenceItems.slice(0, isKlingWorkbench ? 2 : 1) : effectiveInputMode === "all-reference" ? referenceItems.slice(0, 9) : [];
-        const activeFirstFrame = effectiveInputMode === "first-last-frame" ? firstFrameItem : null;
-        const activeLastFrame = effectiveInputMode === "first-last-frame" ? lastFrameItem : null;
-        const activeVideoReferences = effectiveInputMode === "video-continuation" ? videoReferenceItems.slice(0, 1) : effectiveInputMode === "all-reference" ? videoReferenceItems.slice(0, 3) : [];
-        const activeAudioReferences = effectiveInputMode === "all-reference" ? audioReferenceItems.slice(0, 3) : [];
-        if (kling && activeReferences.length > 2) {
+        if (kling && referenceItems.length > 2) {
             message.error("Kling 参考图最多 2 张");
             return null;
         }
@@ -646,7 +595,7 @@ export default function VideoPage() {
                 message.error("Kling v2.6 音频生成需要 pro 模式");
                 return null;
             }
-            if (activeReferences.length > 1) {
+            if (referenceItems.length > 1) {
                 message.error("Kling v2.6 开启音频时最多 1 张参考图");
                 return null;
             }
@@ -659,13 +608,14 @@ export default function VideoPage() {
             }
         }
         if (!kling) {
-            const videoReferenceError = seedanceVideoReferenceError(activeVideoReferences);
+            const videoReferenceError = seedanceVideoReferenceError(videoReferenceItems);
             if (videoReferenceError) {
                 message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
                 return null;
             }
         }
-        return { text, model: modelValue, config: buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue), references: activeReferences.slice(0, kling ? 2 : activeReferences.length), firstFrame: !kling ? activeFirstFrame : null, lastFrame: !kling ? activeLastFrame : null, videoReferences: kling ? [] : activeVideoReferences, audioReferences: kling ? [] : activeAudioReferences, taskCount: normalizeVideoCount(taskCountValue) };
+        const frameReferencesEnabled = !kling && supportsVideoFrameReferences(modelValue);
+        return { text, model: modelValue, config: buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue), references: [...referenceItems].slice(0, kling ? 2 : referenceItems.length), firstFrame: frameReferencesEnabled ? firstFrameItem : null, lastFrame: frameReferencesEnabled ? lastFrameItem : null, videoReferences: kling ? [] : [...videoReferenceItems], audioReferences: kling ? [] : [...audioReferenceItems], taskCount: normalizeVideoCount(taskCountValue) };
     };
 
     const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) => {
@@ -813,7 +763,7 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
-        const referenceImageLimit = isKlingWorkbench ? 2 : inputMode === "image-to-video" ? 1 : inputMode === "all-reference" ? 9 : 0;
+        const referenceImageLimit = isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images;
         const insertImage = async () => {
             if (payload.kind !== "image") {
                 message.warning("请选择图片素材");
@@ -838,8 +788,7 @@ export default function VideoPage() {
                 message.warning("请选择视频素材");
                 return;
             }
-            const limit = inputMode === "video-continuation" ? 1 : inputMode === "all-reference" ? 3 : 0;
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, limit));
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
         };
         const insertAudio = () => {
             if (isKlingWorkbench) {
@@ -851,8 +800,7 @@ export default function VideoPage() {
                 return;
             }
             const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, durationMs: payload.durationMs }], message.warning);
-            const limit = inputMode === "all-reference" ? 3 : 0;
-            setAudioReferences((value) => [...value, ...next].slice(0, limit));
+            setAudioReferences((value) => [...value, ...next].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
         };
 
         if (assetPickerTarget === "element") {
@@ -1116,8 +1064,6 @@ export default function VideoPage() {
                             layout="side"
                             currentLayout={workbenchLayout}
                             prompt={prompt}
-                            inputMode={inputMode}
-                            onInputModeChange={applyInputMode}
                             references={references}
                             firstFrame={firstFrame}
                             lastFrame={lastFrame}
@@ -1213,8 +1159,6 @@ export default function VideoPage() {
                             currentLayout={workbenchLayout}
                             prompt={prompt}
                             negativePrompt={negativePrompt}
-                            inputMode={inputMode}
-                            onInputModeChange={applyInputMode}
                             references={references}
                             firstFrame={firstFrame}
                             lastFrame={lastFrame}
@@ -1312,8 +1256,6 @@ function WorkbenchPanel({
     currentLayout,
     prompt,
     negativePrompt = "",
-    inputMode,
-    onInputModeChange,
     references,
     firstFrame,
     lastFrame,
@@ -1356,8 +1298,6 @@ function WorkbenchPanel({
     currentLayout: WorkbenchLayout;
     prompt: string;
     negativePrompt?: string;
-    inputMode: VideoInputMode;
-    onInputModeChange: (mode: VideoInputMode) => void;
     references: ReferenceImage[];
     firstFrame: ReferenceImage | null;
     lastFrame: ReferenceImage | null;
@@ -1396,6 +1336,7 @@ function WorkbenchPanel({
     bottomSettingsCollapsed?: boolean;
     setBottomSettingsCollapsed?: (value: boolean) => void;
 }) {
+    const frameReferencesEnabled = supportsVideoFrameReferences(model);
     const audioGenerationEnabled = supportsVideoAudioGeneration(model);
     const generateAudio = boolConfig(config.videoGenerateAudio, false);
     const klingBottomConfig = resolveKlingWorkbenchConfig(config, model);
@@ -1404,10 +1345,6 @@ function WorkbenchPanel({
     const klingBottom = Boolean(klingBottomConfig);
     const showAudioSwitch = klingBottom || audioGenerationEnabled;
     const motionControl = isAPIMartKlingMotionControlConfig(config, model) || isKIEKlingMotionControlConfig(config, model);
-    const inputModeSupportsImages = inputMode === "image-to-video" || inputMode === "all-reference";
-    const inputModeSupportsFrames = inputMode === "first-last-frame";
-    const inputModeSupportsVideos = inputMode === "all-reference" || inputMode === "video-continuation";
-    const inputModeSupportsAudio = inputMode === "all-reference";
     const bottomSettingsGridClass = motionControl
         ? showAudioSwitch ? "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr_0.7fr_auto_auto]" : "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.7fr_auto_auto]"
         : showAudioSwitch ? "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.7fr_auto_auto]" : "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.7fr_auto_auto]";
@@ -1424,30 +1361,6 @@ function WorkbenchPanel({
             <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-5 sm:bottom-7 sm:px-10 lg:px-16">
                 <div className="pointer-events-auto w-full max-w-5xl rounded-[24px] bg-white/65 p-4 shadow-[0_32px_100px_rgba(15,23,42,.22),0_10px_34px_rgba(15,23,42,.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:bg-stone-950/60 dark:ring-white/10 dark:shadow-[0_34px_110px_rgba(0,0,0,.58)]">
                     <div className="flex flex-col gap-3">
-                        <VideoInputModeTabs value={inputMode} onChange={onInputModeChange} />
-                        <VideoInputAssets
-                            mode={inputMode}
-                            references={references}
-                            firstFrame={firstFrame}
-                            lastFrame={lastFrame}
-                            videoReferences={videoReferences}
-                            audioReferences={audioReferences}
-                            compact
-                            onPasteReferences={onPasteReferences}
-                            onPasteFrame={onPasteFrame}
-                            onPasteVideoReferences={onPasteVideoReferences}
-                            onPasteAudioReferences={onPasteAudioReferences}
-                            onUploadReferences={onUploadReferences}
-                            onUploadFrame={onUploadFrame}
-                            onOpenAssetPicker={onOpenAssetPicker}
-                            onRemoveFrame={onRemoveFrame}
-                            onRemoveReference={onRemoveReference}
-                            onMoveReference={onMoveReference}
-                            onRemoveVideoReference={onRemoveVideoReference}
-                            onMoveVideoReference={onMoveVideoReference}
-                            onRemoveAudioReference={onRemoveAudioReference}
-                            onMoveAudioReference={onMoveAudioReference}
-                        />
                         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                             <Input.TextArea
                                 value={prompt}
@@ -1521,9 +1434,6 @@ function WorkbenchPanel({
                 <WorkbenchHeader currentLayout={currentLayout} onLayoutChange={onLayoutChange} />
             </div>
             <div className="thin-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3">
-                <WorkbenchSection title="创作方式">
-                    <VideoInputModeTabs value={inputMode} onChange={onInputModeChange} />
-                </WorkbenchSection>
                 <WorkbenchSection title="提示词">
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
@@ -1535,12 +1445,12 @@ function WorkbenchPanel({
                         <Input.TextArea value={prompt} onChange={(event) => onPromptChange(event.target.value)} rows={6} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
                     </div>
                 </WorkbenchSection>
-                {inputModeSupportsFrames ? (
+                {frameReferencesEnabled ? (
                     <WorkbenchSection title="首尾帧" count={[firstFrame, lastFrame].filter(Boolean).length}>
                         <FrameReferenceStrip firstFrame={firstFrame} lastFrame={lastFrame} onPasteFrame={onPasteFrame} onUploadFrame={onUploadFrame} onOpenAssetPicker={onOpenAssetPicker} onRemoveFrame={onRemoveFrame} />
                     </WorkbenchSection>
                 ) : null}
-                {inputModeSupportsImages ? <WorkbenchSection title={inputMode === "image-to-video" ? "参考图片" : "参考图"} count={references.length}>
+                <WorkbenchSection title="参考图" count={references.length}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences}>剪切板</Button>
@@ -1549,8 +1459,8 @@ function WorkbenchPanel({
                         </div>
                         <ReferenceImageStrip references={references} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
                     </div>
-                </WorkbenchSection> : null}
-                {inputModeSupportsVideos ? <WorkbenchSection title={inputMode === "video-continuation" ? "续写视频" : "参考视频"} count={videoReferences.length}>
+                </WorkbenchSection>
+                <WorkbenchSection title="参考视频" count={videoReferences.length}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteVideoReferences}>剪贴板</Button>
@@ -1559,8 +1469,8 @@ function WorkbenchPanel({
                         </div>
                         <ReferenceVideoStrip references={videoReferences} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
                     </div>
-                </WorkbenchSection> : null}
-                {inputModeSupportsAudio ? <WorkbenchSection title="参考音频" count={audioReferences.length}>
+                </WorkbenchSection>
+                <WorkbenchSection title="参考音频" count={audioReferences.length}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteAudioReferences}>剪贴板</Button>
@@ -1569,7 +1479,7 @@ function WorkbenchPanel({
                         </div>
                         <ReferenceAudioStrip references={audioReferences} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
                     </div>
-                </WorkbenchSection> : null}
+                </WorkbenchSection>
                 {motionControl ? <CharacterOrientationSetting value={config.videoCharacterOrientation} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
                 <GenerationSettings config={config} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 <WorkbenchSection title="任务数量">
@@ -1593,66 +1503,6 @@ function WorkbenchHeader({ currentLayout, onLayoutChange }: { currentLayout: Wor
                 <Button size="small" type={currentLayout === "side" ? "primary" : "text"} icon={<PanelLeft className="size-3.5" />} onClick={() => onLayoutChange("side")}>侧边</Button>
                 <Button size="small" type={currentLayout === "bottom" ? "primary" : "text"} icon={<PanelBottom className="size-3.5" />} onClick={() => onLayoutChange("bottom")}>底部</Button>
             </div>
-        </div>
-    );
-}
-
-function VideoInputModeTabs({ value, onChange }: { value: VideoInputMode; onChange: (value: VideoInputMode) => void }) {
-    return (
-        <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-0.5">
-            {videoInputModeOptions.map((item) => (
-                <button
-                    key={item.value}
-                    type="button"
-                    className={`shrink-0 rounded-xl border px-3.5 py-2 text-sm font-medium transition ${value === item.value ? "border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900" : "border-stone-200 bg-transparent text-stone-500 hover:border-stone-400 hover:text-stone-900 dark:border-stone-800 dark:text-stone-400 dark:hover:border-stone-600 dark:hover:text-stone-100"}`}
-                    onClick={() => onChange(item.value)}
-                >
-                    {item.label}
-                </button>
-            ))}
-        </div>
-    );
-}
-
-function VideoInputAssets({ mode, references, firstFrame, lastFrame, videoReferences, audioReferences, compact = false, onPasteReferences, onPasteFrame, onPasteVideoReferences, onPasteAudioReferences, onUploadReferences, onUploadFrame, onOpenAssetPicker, onRemoveFrame, onRemoveReference, onMoveReference, onRemoveVideoReference, onMoveVideoReference, onRemoveAudioReference, onMoveAudioReference }: {
-    mode: VideoInputMode;
-    references: ReferenceImage[];
-    firstFrame: ReferenceImage | null;
-    lastFrame: ReferenceImage | null;
-    videoReferences: ReferenceVideo[];
-    audioReferences: ReferenceAudio[];
-    compact?: boolean;
-    onPasteReferences: () => void;
-    onPasteFrame: (slot: "first" | "last") => void;
-    onPasteVideoReferences: () => void;
-    onPasteAudioReferences: () => void;
-    onUploadReferences: () => void;
-    onUploadFrame: (slot: "first" | "last") => void;
-    onOpenAssetPicker: (target?: AssetPickerTarget) => void;
-    onRemoveFrame: (slot: "first" | "last") => void;
-    onRemoveReference: (id: string) => void;
-    onMoveReference: (index: number, offset: number) => void;
-    onRemoveVideoReference: (id: string) => void;
-    onMoveVideoReference: (index: number, offset: number) => void;
-    onRemoveAudioReference: (id: string) => void;
-    onMoveAudioReference: (index: number, offset: number) => void;
-}) {
-    if (mode === "text-to-video") return null;
-    const actionButtons = (kind: "image" | "video" | "audio") => (
-        <div className="flex flex-wrap gap-1">
-            <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={kind === "image" ? onPasteReferences : kind === "video" ? onPasteVideoReferences : onPasteAudioReferences}>剪贴板</Button>
-            <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUploadReferences}>上传</Button>
-            <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker(kind)}>从素材库选择</Button>
-        </div>
-    );
-    if (mode === "first-last-frame") {
-        return <div className={compact ? "grid gap-2" : "space-y-3"}><FrameReferenceStrip firstFrame={firstFrame} lastFrame={lastFrame} compact={false} onPasteFrame={onPasteFrame} onUploadFrame={onUploadFrame} onOpenAssetPicker={onOpenAssetPicker} onRemoveFrame={onRemoveFrame} /></div>;
-    }
-    return (
-        <div className={compact ? "grid gap-2" : "space-y-3"}>
-            {(mode === "image-to-video" || mode === "all-reference") ? <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-xs font-medium text-stone-600 dark:text-stone-300">{mode === "image-to-video" ? "图片（最多 1 张）" : "参考图（最多 9 张）"}</span>{actionButtons("image")}</div><ReferenceImageStrip references={references} compact={compact} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} /></div> : null}
-            {(mode === "video-continuation" || mode === "all-reference") ? <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-xs font-medium text-stone-600 dark:text-stone-300">{mode === "video-continuation" ? "续写视频（最多 1 个）" : "参考视频（最多 3 个）"}</span>{actionButtons("video")}</div><ReferenceVideoStrip references={videoReferences} compact={compact} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} /></div> : null}
-            {mode === "all-reference" ? <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-xs font-medium text-stone-600 dark:text-stone-300">参考音频（最多 3 个）</span>{actionButtons("audio")}</div><ReferenceAudioStrip references={audioReferences} compact={compact} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} /></div> : null}
         </div>
     );
 }

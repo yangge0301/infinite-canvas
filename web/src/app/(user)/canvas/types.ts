@@ -23,6 +23,7 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasVideoInputMode = "text-to-video" | "image-to-video" | "first-last-frame" | "all-reference" | "video-continuation";
 
 export type CanvasImageCandidate = {
     id: string;
@@ -146,6 +147,8 @@ export type CanvasNodeMetadata = {
     videoTaskVideoId?: string;
     firstFrameNodeId?: string;
     lastFrameNodeId?: string;
+    videoInputMode?: CanvasVideoInputMode;
+    videoReferenceNodeIds?: string[];
     multiShot?: string;
     shotType?: string;
     klingImageNodeIds?: string[];

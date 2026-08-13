@@ -51,7 +51,7 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasImageCandidatePicker } from "../components/canvas-image-candidate-picker";
 import { CanvasVideoCandidatePicker } from "../components/canvas-video-candidate-picker";
-import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasVideoFrameOption } from "../components/canvas-node-prompt-panel";
+import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasVideoFrameOption, type CanvasVideoReferenceKind, type CanvasVideoReferenceSlot } from "../components/canvas-node-prompt-panel";
 import type { CanvasVideoResourceOption } from "../components/canvas-video-settings-popover";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab } from "../components/asset-picker-modal";
@@ -79,6 +79,7 @@ import {
     type CanvasNodeData,
     type CanvasNodeMetadata,
     type CanvasPendingAgentRequest,
+    type CanvasVideoInputMode,
     type ConnectionHandle,
     type ContextMenuState,
     type InsertAssetPayload,
@@ -1680,6 +1681,99 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         }
     }, [message]);
 
+    const handleVideoReferenceUpload = useCallback(async (targetNodeId: string, mode: CanvasVideoInputMode, kind: CanvasVideoReferenceKind, slot: CanvasVideoReferenceSlot, file: File) => {
+        const validFile = kind === "image" ? file.type.startsWith("image/") : kind === "video" ? file.type.startsWith("video/") : isAudioFile(file);
+        if (!validFile) {
+            message.warning(`请选择${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}文件`);
+            return;
+        }
+        const target = nodesRef.current.find((node) => node.id === targetNodeId);
+        if (!target || target.type !== CanvasNodeType.Video) return;
+        const existingIds = target.metadata?.videoReferenceNodeIds || [];
+        const referenceIndex = existingIds.length;
+        const hideLoading = message.loading(`正在上传${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}...`, 0);
+        try {
+            let referenceNode: CanvasNodeData;
+            if (kind === "image") {
+                const image = await uploadImage(file);
+                const size = fitNodeSize(image.width, image.height);
+                referenceNode = {
+                    id: `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    type: CanvasNodeType.Image,
+                    title: file.name,
+                    position: { x: target.position.x - size.width - 96, y: target.position.y + referenceIndex * 36 },
+                    width: size.width,
+                    height: size.height,
+                    metadata: imageMetadata(image),
+                };
+            } else if (kind === "video") {
+                const video = await uploadMediaFile(file, "video");
+                const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                referenceNode = {
+                    id: `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    type: CanvasNodeType.Video,
+                    title: file.name,
+                    position: { x: target.position.x - size.width - 96, y: target.position.y + referenceIndex * 36 },
+                    width: size.width,
+                    height: size.height,
+                    metadata: videoMetadata(video),
+                };
+            } else {
+                const audio = await uploadMediaFile(file, "audio");
+                const size = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+                referenceNode = {
+                    id: `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    type: CanvasNodeType.Audio,
+                    title: file.name,
+                    position: { x: target.position.x - size.width - 96, y: target.position.y + referenceIndex * 36 },
+                    width: size.width,
+                    height: size.height,
+                    metadata: audioMetadata(audio),
+                };
+            }
+            setNodes((prev) => [
+                ...prev.map((node) => {
+                    if (node.id !== targetNodeId) return node;
+                    const selectedIds = mode === "image-to-video" || mode === "video-continuation" ? [referenceNode.id] : mode === "all-reference" ? [...(node.metadata?.videoReferenceNodeIds || []), referenceNode.id] : node.metadata?.videoReferenceNodeIds || [];
+                    return {
+                        ...node,
+                        metadata: {
+                            ...node.metadata,
+                            videoInputMode: mode,
+                            videoReferenceNodeIds: selectedIds,
+                            ...(slot === "firstFrame" ? { firstFrameNodeId: referenceNode.id } : {}),
+                            ...(slot === "lastFrame" ? { lastFrameNodeId: referenceNode.id } : {}),
+                        },
+                    };
+                }),
+                referenceNode,
+            ]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: referenceNode.id, toNodeId: targetNodeId }]);
+            message.success("参考素材已添加");
+        } catch (error) {
+            console.error("Upload video reference failed:", error);
+            message.error("参考素材上传失败");
+        } finally {
+            hideLoading();
+        }
+    }, [message]);
+
+    const handleVideoReferenceRemove = useCallback((targetNodeId: string, slot: CanvasVideoReferenceSlot, resourceNodeId: string) => {
+        setNodes((prev) => prev.map((node) => {
+            if (node.id !== targetNodeId) return node;
+            return {
+                ...node,
+                metadata: {
+                    ...node.metadata,
+                    videoReferenceNodeIds: (node.metadata?.videoReferenceNodeIds || []).filter((id) => id !== resourceNodeId),
+                    ...(slot === "firstFrame" ? { firstFrameNodeId: undefined } : {}),
+                    ...(slot === "lastFrame" ? { lastFrameNodeId: undefined } : {}),
+                },
+            };
+        }));
+        setConnections((prev) => prev.filter((connection) => connection.fromNodeId !== resourceNodeId || connection.toNodeId !== targetNodeId));
+    }, []);
+
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
             const trimmed = text.trim();
@@ -3037,6 +3131,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                             characterOrientation: videoGenerationConfig.videoCharacterOrientation,
                                             watermark: videoGenerationConfig.videoWatermark,
                                             references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages, firstFrame, lastFrame }),
+                                            videoInputMode: sourceNode.metadata?.videoInputMode,
+                                            videoReferenceNodeIds: sourceNode.metadata?.videoReferenceNodeIds,
                                             firstFrameNodeId: sourceNode.metadata?.firstFrameNodeId,
                                             lastFrameNodeId: sourceNode.metadata?.lastFrameNodeId,
                                             klingImageNodeIds: sourceNode.metadata?.klingImageNodeIds,
@@ -3073,7 +3169,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, cameraControl: sourceNode?.metadata?.cameraControl, status: NODE_STATUS_LOADING, model: videoGenerationConfig.model, channelId: videoGenerationConfig.videoChannelId || videoGenerationConfig.activeChannelId, size: videoGenerationConfig.size, seconds: videoGenerationConfig.videoSeconds, vquality: videoGenerationConfig.vquality, mode: videoGenerationConfig.videoMode, negativePrompt: videoGenerationConfig.videoNegativePrompt, multiShot: videoGenerationConfig.videoMultiShot, shotType: videoGenerationConfig.videoShotType, generateAudio: videoGenerationConfig.videoGenerateAudio, characterOrientation: videoGenerationConfig.videoCharacterOrientation, watermark: videoGenerationConfig.videoWatermark, references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages, firstFrame, lastFrame }), firstFrameNodeId: sourceNode?.metadata?.firstFrameNodeId, lastFrameNodeId: sourceNode?.metadata?.lastFrameNodeId, klingImageNodeIds: sourceNode?.metadata?.klingImageNodeIds, klingMultiPrompt: sourceNode?.metadata?.klingMultiPrompt, klingElementList: sourceNode?.metadata?.klingElementList, startedAt: generationStartedAt, progress: 0, videoTaskId: clientTaskId },
+                        metadata: { prompt: effectivePrompt, cameraControl: sourceNode?.metadata?.cameraControl, status: NODE_STATUS_LOADING, model: videoGenerationConfig.model, channelId: videoGenerationConfig.videoChannelId || videoGenerationConfig.activeChannelId, size: videoGenerationConfig.size, seconds: videoGenerationConfig.videoSeconds, vquality: videoGenerationConfig.vquality, mode: videoGenerationConfig.videoMode, negativePrompt: videoGenerationConfig.videoNegativePrompt, multiShot: videoGenerationConfig.videoMultiShot, shotType: videoGenerationConfig.videoShotType, generateAudio: videoGenerationConfig.videoGenerateAudio, characterOrientation: videoGenerationConfig.videoCharacterOrientation, watermark: videoGenerationConfig.videoWatermark, references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages, firstFrame, lastFrame }), videoInputMode: sourceNode?.metadata?.videoInputMode, videoReferenceNodeIds: sourceNode?.metadata?.videoReferenceNodeIds, firstFrameNodeId: sourceNode?.metadata?.firstFrameNodeId, lastFrameNodeId: sourceNode?.metadata?.lastFrameNodeId, klingImageNodeIds: sourceNode?.metadata?.klingImageNodeIds, klingMultiPrompt: sourceNode?.metadata?.klingMultiPrompt, klingElementList: sourceNode?.metadata?.klingElementList, startedAt: generationStartedAt, progress: 0, videoTaskId: clientTaskId },
                     };
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
@@ -3980,6 +4076,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
                                         videoFrameOptions={videoFrameOptionsByNodeId.get(panelNode.id) || []}
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(panelNode.id) || []}
+                                        onVideoReferenceUpload={handleVideoReferenceUpload}
+                                        onVideoReferenceRemove={handleVideoReferenceRemove}
                                         canvasScale={viewport.k}
                                         positionVersion={`${viewport.x}:${viewport.y}:${viewport.k}`}
                                         onPromptChange={handleNodePromptChange}
