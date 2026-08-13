@@ -51,7 +51,7 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasImageCandidatePicker } from "../components/canvas-image-candidate-picker";
 import { CanvasVideoCandidatePicker } from "../components/canvas-video-candidate-picker";
-import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasVideoFrameOption, type CanvasVideoReferenceKind, type CanvasVideoReferenceSlot } from "../components/canvas-node-prompt-panel";
+import { CanvasNodePromptPanel, type CanvasNodeGenerationMode, type CanvasTextReference, type CanvasVideoFrameOption, type CanvasVideoReferenceKind, type CanvasVideoReferenceSlot } from "../components/canvas-node-prompt-panel";
 import type { CanvasVideoResourceOption } from "../components/canvas-video-settings-popover";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab } from "../components/asset-picker-modal";
@@ -954,6 +954,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
         return map;
     }, [connections, nodes]);
+    const textReferencesByNodeId = useMemo(() => {
+        const map = new Map<string, CanvasTextReference[]>();
+        connections.forEach((connection) => {
+            const source = nodeById.get(connection.fromNodeId);
+            const target = nodeById.get(connection.toNodeId);
+            if (source?.type !== CanvasNodeType.Text || (target?.type !== CanvasNodeType.Video && !isCanvasImageNodeType(target?.type))) return;
+            map.set(target.id, [...(map.get(target.id) || []), { connectionId: connection.id, nodeId: source.id, title: source.title || source.metadata?.content?.slice(0, 32) || "文本节点" }]);
+        });
+        return map;
+    }, [connections, nodeById]);
     const videoFrameOptionsByNodeId = useMemo(() => {
         const map = new Map<string, CanvasVideoFrameOption[]>();
         nodes.forEach((node) => {
@@ -4092,6 +4102,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(panelNode.id) || []}
                                         onVideoReferenceUpload={handleVideoReferenceUpload}
                                         onVideoReferenceRemove={handleVideoReferenceRemove}
+                                        textReferences={textReferencesByNodeId.get(panelNode.id) || []}
+                                        onTextReferenceRemove={deleteConnection}
                                         onResourcePreview={(nodeId) => {
                                             const reference = nodesRef.current.find((node) => node.id === nodeId);
                                             if (!reference?.metadata?.content) return;

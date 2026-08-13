@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, Ban, Image as ImageIcon, LoaderCircle, Music2, Plus, Video, X } from "lucide-react";
+import { ArrowUp, Ban, Image as ImageIcon, LoaderCircle, Music2, Plus, Type as TypeIcon, Video, X } from "lucide-react";
 import { Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -25,6 +25,7 @@ export type { CanvasVideoFrameOption };
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 export type CanvasVideoReferenceKind = "image" | "video" | "audio";
 export type CanvasVideoReferenceSlot = "reference" | "firstFrame" | "lastFrame";
+export type CanvasTextReference = { connectionId: string; nodeId: string; title: string };
 
 function videoReferenceAccept(kind: CanvasVideoReferenceKind) {
     return kind === "image" ? "image/*" : kind === "video" ? "video/*" : "audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav";
@@ -41,6 +42,8 @@ type CanvasNodePromptPanelProps = {
     videoResourceOptions?: CanvasVideoResourceOption[];
     onVideoReferenceUpload?: (nodeId: string, mode: CanvasVideoInputMode, kind: CanvasVideoReferenceKind, slot: CanvasVideoReferenceSlot, file: File) => Promise<void>;
     onVideoReferenceRemove?: (nodeId: string, slot: CanvasVideoReferenceSlot, resourceNodeId: string) => void;
+    textReferences?: CanvasTextReference[];
+    onTextReferenceRemove?: (connectionId: string) => void;
     onResourcePreview?: (nodeId: string) => void;
     canvasScale?: number;
     positionVersion?: string;
@@ -48,7 +51,7 @@ type CanvasNodePromptPanelProps = {
     onPromptFocus?: () => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onVideoReferenceUpload, onVideoReferenceRemove, onResourcePreview, canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onVideoReferenceUpload, onVideoReferenceRemove, textReferences = [], onTextReferenceRemove, onResourcePreview, canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -106,6 +109,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     onPreview={onResourcePreview}
                 />
             ) : null}
+            {(mode === "image" || mode === "video") && textReferences.length ? <CanvasTextReferenceChips references={textReferences} theme={theme} onRemove={onTextReferenceRemove} /> : null}
             <CanvasPromptChipInput
                 value={prompt}
                 references={mentionReferences}
@@ -174,6 +178,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </div>
         </div>
     );
+}
+
+function CanvasTextReferenceChips({ references, theme, onRemove }: { references: CanvasTextReference[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRemove?: (connectionId: string) => void }) {
+    return <div className="mb-2 flex flex-wrap gap-1.5">{references.map((reference) => <span key={reference.connectionId} className="inline-flex h-8 max-w-full items-center gap-1 rounded-full border pl-2 pr-1 text-xs" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }} title={reference.title}><TypeIcon className="size-3 shrink-0" /><span className="max-w-44 truncate">{reference.title}</span>{onRemove ? <button type="button" title="断开文本引用" aria-label={`断开${reference.title}的文本引用`} className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full transition hover:bg-black/10" style={{ color: theme.node.muted }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(reference.connectionId); }}><X className="size-3" /></button> : null}</span>)}</div>;
 }
 
 const VIDEO_INPUT_MODE_OPTIONS: Array<{ value: CanvasVideoInputMode; label: string }> = [
