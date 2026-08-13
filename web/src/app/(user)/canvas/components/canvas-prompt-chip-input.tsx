@@ -13,7 +13,6 @@ type CanvasPromptChipInputProps = {
     value: string;
     references: CanvasResourceReference[];
     onChange: (value: string) => void;
-    onSubmit?: () => void;
     onFocus?: () => void;
     onResourcePreview?: (nodeId: string) => void;
     className?: string;
@@ -30,7 +29,7 @@ type PromptToken =
     | { type: "text"; value: string }
     | { type: "reference"; label: string };
 
-export function CanvasPromptChipInput({ value, references, onChange, onSubmit, onFocus, onResourcePreview, className, style, placeholder }: CanvasPromptChipInputProps) {
+export function CanvasPromptChipInput({ value, references, onChange, onFocus, onResourcePreview, className, style, placeholder }: CanvasPromptChipInputProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -210,12 +209,6 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, o
                     if ((event.key === "Backspace" || event.key === "Delete") && deleteAdjacentReference(event.key)) {
                         event.preventDefault();
                         requestAnimationFrame(syncFromEditor);
-                        return;
-                    }
-
-                    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && onSubmit) {
-                        event.preventDefault();
-                        onSubmit();
                         return;
                     }
 

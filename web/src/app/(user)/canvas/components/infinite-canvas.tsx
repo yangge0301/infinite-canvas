@@ -6,6 +6,12 @@ import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "../types";
 
+const canvasControlSelector = "[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
+
+function isCanvasControl(target: EventTarget | null) {
+    return target instanceof Element && Boolean(target.closest(canvasControlSelector));
+}
+
 type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     viewport: ViewportTransform;
@@ -30,13 +36,37 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         hasMoved: false,
     });
     const scaleRef = useRef(viewport.k);
+    const viewportRef = useRef(viewport);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
+    const gestureScaleRef = useRef(1);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
 
     useEffect(() => {
         scaleRef.current = viewport.k;
-    }, [viewport.k]);
+        viewportRef.current = viewport;
+    }, [viewport]);
+
+    const zoomAtPoint = (factor: number, clientX: number, clientY: number) => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect || !Number.isFinite(factor)) return;
+
+        const currentViewport = viewportRef.current;
+        const newScale = Math.min(Math.max(currentViewport.k * factor, 0.05), 5);
+        const mouseX = clientX - rect.left;
+        const mouseY = clientY - rect.top;
+        const worldX = (mouseX - currentViewport.x) / currentViewport.k;
+        const worldY = (mouseY - currentViewport.y) / currentViewport.k;
+        const nextViewport = {
+            x: mouseX - worldX * newScale,
+            y: mouseY - worldY * newScale,
+            k: newScale,
+        };
+
+        scaleRef.current = newScale;
+        viewportRef.current = nextViewport;
+        onViewportChange(nextViewport);
+    };
 
     useEffect(
         () => () => {
@@ -65,31 +95,21 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     }, []);
 
     const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-        const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+        if (isCanvasControl(event.target)) return;
+
+        event.preventDefault();
 
         if (!event.ctrlKey && !event.metaKey) {
-            onViewportChange({ x: viewport.x - event.deltaX, y: viewport.y - event.deltaY, k: viewport.k });
+            const currentViewport = viewportRef.current;
+            const nextViewport = { x: currentViewport.x - event.deltaX, y: currentViewport.y - event.deltaY, k: currentViewport.k };
+            viewportRef.current = nextViewport;
+            onViewportChange(nextViewport);
             return;
         }
 
         // macOS trackpad pinch is delivered as a ctrl/meta wheel gesture.
         const delta = -event.deltaY;
-        const factor = Math.pow(1.15, delta / 100);
-        const newScale = Math.min(Math.max(viewport.k * factor, 0.05), 5);
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect) return;
-
-        const mouseX = event.clientX - rect.left;
-        const mouseY = event.clientY - rect.top;
-        const worldX = (mouseX - viewport.x) / viewport.k;
-        const worldY = (mouseY - viewport.y) / viewport.k;
-
-        onViewportChange({
-            x: mouseX - worldX * newScale,
-            y: mouseY - worldY * newScale,
-            k: newScale,
-        });
+        zoomAtPoint(Math.pow(1.45, delta / 100), event.clientX, event.clientY);
     };
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -175,13 +195,45 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         if (!container) return;
 
         const preventWheelScroll = (event: WheelEvent) => {
-            const target = event.target instanceof Element ? event.target : null;
-            if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
+            if (isCanvasControl(event.target)) return;
             event.preventDefault();
         };
         container.addEventListener("wheel", preventWheelScroll, { passive: false });
         return () => container.removeEventListener("wheel", preventWheelScroll);
     }, [containerRef]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const preventBrowserGestureZoom = (event: Event) => {
+            event.preventDefault();
+        };
+        const handleGestureStart = (event: Event) => {
+            preventBrowserGestureZoom(event);
+            gestureScaleRef.current = (event as Event & { scale?: number }).scale || 1;
+        };
+        const handleGestureChange = (event: Event) => {
+            preventBrowserGestureZoom(event);
+            if (isCanvasControl(event.target)) return;
+
+            const gesture = event as Event & { scale?: number; clientX?: number; clientY?: number };
+            const nextGestureScale = gesture.scale || 1;
+            const factor = Math.pow(nextGestureScale / gestureScaleRef.current, 1.75);
+            gestureScaleRef.current = nextGestureScale;
+            const rect = container.getBoundingClientRect();
+            zoomAtPoint(factor, gesture.clientX ?? rect.left + rect.width / 2, gesture.clientY ?? rect.top + rect.height / 2);
+        };
+
+        container.addEventListener("gesturestart", handleGestureStart, { passive: false });
+        container.addEventListener("gesturechange", handleGestureChange, { passive: false });
+        container.addEventListener("gestureend", preventBrowserGestureZoom, { passive: false });
+        return () => {
+            container.removeEventListener("gesturestart", handleGestureStart);
+            container.removeEventListener("gesturechange", handleGestureChange);
+            container.removeEventListener("gestureend", preventBrowserGestureZoom);
+        };
+    }, [containerRef, onViewportChange]);
 
     return (
         <div

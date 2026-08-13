@@ -118,7 +118,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 value={prompt}
                 references={mentionReferences}
                 onChange={updatePrompt}
-                onSubmit={submit}
                 onFocus={onPromptFocus}
                 onResourcePreview={onResourcePreview}
                 className="thin-scrollbar h-40 w-full resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
