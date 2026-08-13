@@ -24,11 +24,12 @@ type CanvasAudioSettingsPopoverProps = {
     resourceOptions?: CanvasVideoResourceOption[];
     metadata?: CanvasNodeMetadata;
     onMetadataChange?: (patch: Partial<CanvasNodeMetadata>) => void;
+    onResourcePreview?: (nodeId: string) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
 };
 
-export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOptions = [], metadata, onMetadataChange, buttonClassName, placement = "topLeft" }: CanvasAudioSettingsPopoverProps) {
+export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOptions = [], metadata, onMetadataChange, onResourcePreview, buttonClassName, placement = "topLeft" }: CanvasAudioSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -60,7 +61,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
 
     const audioOptions = useMemo(() => resourceOptions.filter((item) => item.kind === "audio"), [resourceOptions]);
     const cloneAudioNodeId = validCloneAudioNodeId(metadata?.mimoVoiceCloneAudioNodeId, audioOptions);
-    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} audioOptions={audioOptions} cloneAudioNodeId={cloneAudioNodeId} onMetadataChange={onMetadataChange} /> : null;
+    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} audioOptions={audioOptions} cloneAudioNodeId={cloneAudioNodeId} onMetadataChange={onMetadataChange} onResourcePreview={onResourcePreview} /> : null;
 
     return (
         <>
@@ -74,7 +75,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
     );
 }
 
-function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, capability, onConfigChange, audioOptions, cloneAudioNodeId, onMetadataChange }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasAudioSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; capability: ReturnType<typeof modelCapabilityFor>; onConfigChange: CanvasAudioSettingsPopoverProps["onConfigChange"]; audioOptions: CanvasVideoResourceOption[]; cloneAudioNodeId: string; onMetadataChange?: CanvasAudioSettingsPopoverProps["onMetadataChange"] }) {
+function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, capability, onConfigChange, audioOptions, cloneAudioNodeId, onMetadataChange, onResourcePreview }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasAudioSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; capability: ReturnType<typeof modelCapabilityFor>; onConfigChange: CanvasAudioSettingsPopoverProps["onConfigChange"]; audioOptions: CanvasVideoResourceOption[]; cloneAudioNodeId: string; onMetadataChange?: CanvasAudioSettingsPopoverProps["onMetadataChange"]; onResourcePreview?: CanvasAudioSettingsPopoverProps["onResourcePreview"] }) {
     const width = 356;
     const gap = 8;
     const margin = 12;
@@ -110,6 +111,7 @@ function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, c
                         emptyText={audioOptions.length ? "请选择已连接音频" : "暂无已连接音频节点"}
                         theme={theme}
                         onChange={(value) => onMetadataChange?.({ mimoVoiceCloneAudioNodeId: value || undefined })}
+                        onResourcePreview={onResourcePreview}
                     />
                 ) : null}
                 <AudioSettingsPanel config={config} capability={capability} onConfigChange={onConfigChange} theme={theme} showTitle={false} className="space-y-4" />

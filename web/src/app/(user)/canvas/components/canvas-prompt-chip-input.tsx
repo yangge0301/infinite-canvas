@@ -15,6 +15,7 @@ type CanvasPromptChipInputProps = {
     onChange: (value: string) => void;
     onSubmit?: () => void;
     onFocus?: () => void;
+    onResourcePreview?: (nodeId: string) => void;
     className?: string;
     style?: CSSProperties;
     placeholder?: string;
@@ -29,7 +30,7 @@ type PromptToken =
     | { type: "text"; value: string }
     | { type: "reference"; label: string };
 
-export function CanvasPromptChipInput({ value, references, onChange, onSubmit, onFocus, className, style, placeholder }: CanvasPromptChipInputProps) {
+export function CanvasPromptChipInput({ value, references, onChange, onSubmit, onFocus, onResourcePreview, className, style, placeholder }: CanvasPromptChipInputProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -59,11 +60,11 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, o
                 return;
             }
             const reference = referenceByLabel.get(token.label);
-            if (reference) editor.append(createReferenceChip(reference, theme, setImagePreview));
+            if (reference) editor.append(createReferenceChip(reference, theme, onResourcePreview || ((nodeId) => { const item = activeReferences.find((reference) => reference.nodeId === nodeId); if (item?.kind === "image" && item.previewUrl) setImagePreview(item.previewUrl); })));
             else editor.append(document.createTextNode(token.label));
         });
         lastEmittedRef.current = value;
-    }, [referenceByLabel, theme, tokens, value]);
+    }, [activeReferences, onResourcePreview, referenceByLabel, theme, tokens, value]);
 
     const emitChange = (nextValue: string) => {
         lastEmittedRef.current = nextValue;
@@ -101,7 +102,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, o
         if (!editor) return;
         removeActiveMention();
         const leadingSpace = document.createTextNode(" ");
-        const chip = createReferenceChip(reference, theme, setImagePreview);
+        const chip = createReferenceChip(reference, theme, onResourcePreview || ((nodeId) => { const item = activeReferences.find((reference) => reference.nodeId === nodeId); if (item?.kind === "image" && item.previewUrl) setImagePreview(item.previewUrl); }));
         const trailingSpace = document.createTextNode(" ");
         const selection = window.getSelection();
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
@@ -359,11 +360,7 @@ function ReferencePreview({ reference }: { reference: CanvasResourceReference })
     );
 }
 
-function createReferenceChip(
-    reference: CanvasResourceReference,
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes],
-    onImagePreview: (url: string) => void,
-) {
+function createReferenceChip(reference: CanvasResourceReference, theme: (typeof canvasThemes)[keyof typeof canvasThemes], onPreview: (nodeId: string) => void) {
     const wrapper = document.createElement("span");
     wrapper.contentEditable = "false";
     wrapper.dataset.refLabel = reference.label;
@@ -377,12 +374,12 @@ function createReferenceChip(
         wrapper.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            onImagePreview(reference.previewUrl || "");
+            onPreview(reference.nodeId);
         });
         return wrapper;
     }
 
-    wrapper.className = "mx-px inline-flex h-6 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle";
+    wrapper.className = `mx-px inline-flex h-6 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle${reference.kind === "text" ? "" : " cursor-pointer"}`;
     wrapper.style.background = theme.toolbar.panel;
     wrapper.style.borderColor = theme.node.stroke;
     wrapper.style.color = theme.node.text;
@@ -391,6 +388,11 @@ function createReferenceChip(
     text.className = "block truncate";
     text.textContent = reference.kind === "text" ? reference.text || reference.title : reference.label;
     wrapper.appendChild(text);
+    if (reference.kind !== "text") wrapper.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onPreview(reference.nodeId);
+    });
     return wrapper;
 }
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
@@ -388,6 +388,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+    const [mediaPreviewNodeId, setMediaPreviewNodeId] = useState<string | null>(null);
     const [candidatePickerNodeId, setCandidatePickerNodeId] = useState<string | null>(null);
     const [videoCandidatePickerNodeId, setVideoCandidatePickerNodeId] = useState<string | null>(null);
     const [agentPanel, setAgentPanel] = useState(DEFAULT_CANVAS_AGENT_PANEL);
@@ -867,6 +868,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
+    const mediaPreviewNode = mediaPreviewNodeId ? nodeById.get(mediaPreviewNodeId) || null : null;
     const candidatePickerNode = candidatePickerNodeId ? nodeById.get(candidatePickerNodeId) || null : null;
     const videoCandidatePickerNode = videoCandidatePickerNodeId ? nodeById.get(videoCandidatePickerNodeId) || null : null;
     const openDirectorNode = openDirectorNodeId ? nodeById.get(openDirectorNodeId) || null : null;
@@ -980,7 +982,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 }
                 if (isCanvasImageNodeType(source.type) && source.metadata?.content) return [{ nodeId: source.id, kind: "image" as const, label, previewUrl: source.metadata.content }];
                 if (source.type === CanvasNodeType.Video && source.metadata?.content) return [{ nodeId: source.id, kind: "video" as const, label, previewUrl: source.metadata.content }];
-                if (source.type === CanvasNodeType.Audio && source.metadata?.content) return [{ nodeId: source.id, kind: "audio" as const, label }];
+                if (source.type === CanvasNodeType.Audio && source.metadata?.content) return [{ nodeId: source.id, kind: "audio" as const, label, previewUrl: source.metadata.content }];
                 return [];
             });
             map.set(node.id, options);
@@ -1078,6 +1080,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
+            setMediaPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nextNodes, chatSessions });
@@ -1113,6 +1116,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setSuperResolveNodeId(null);
         setAngleNodeId(null);
         setPreviewNodeId(null);
+        setMediaPreviewNodeId(null);
         setCandidatePickerNodeId(null);
         setVideoCandidatePickerNodeId(null);
     }, [cancelPendingConnectionCreate]);
@@ -1373,6 +1377,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setSuperResolveNodeId(null);
         setAngleNodeId(null);
         setPreviewNodeId(null);
+        setMediaPreviewNodeId(null);
         setCandidatePickerNodeId(null);
         setVideoCandidatePickerNodeId(null);
         if (nodesRef.current.find((node) => node.id === nodeId)?.type === CanvasNodeType.Group) setDialogNodeId(null);
@@ -4087,6 +4092,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(panelNode.id) || []}
                                         onVideoReferenceUpload={handleVideoReferenceUpload}
                                         onVideoReferenceRemove={handleVideoReferenceRemove}
+                                        onResourcePreview={(nodeId) => {
+                                            const reference = nodesRef.current.find((node) => node.id === nodeId);
+                                            if (!reference?.metadata?.content) return;
+                                            if (isCanvasImageNodeType(reference.type)) setPreviewNodeId(nodeId);
+                                            else setMediaPreviewNodeId(nodeId);
+                                        }}
                                         canvasScale={viewport.k}
                                         positionVersion={`${viewport.x}:${viewport.y}:${viewport.k}`}
                                         onPromptChange={handleNodePromptChange}
@@ -4114,6 +4125,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         videoFrameOptions={videoFrameOptionsByNodeId.get(contentNode.id) || []}
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(contentNode.id) || []}
                                         onConfigChange={handleConfigNodeChange}
+                                        onResourcePreview={(nodeId) => {
+                                            const reference = nodesRef.current.find((node) => node.id === nodeId);
+                                            if (!reference?.metadata?.content) return;
+                                            if (isCanvasImageNodeType(reference.type)) setPreviewNodeId(nodeId);
+                                            else setMediaPreviewNodeId(nodeId);
+                                        }}
                                         onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                                         onGenerate={(nodeId) => {
                                             const target = nodesRef.current.find((item) => item.id === nodeId);
@@ -4391,6 +4408,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     );
                 })() : null}
 
+                {mediaPreviewNode?.metadata?.content && (mediaPreviewNode.type === CanvasNodeType.Video || mediaPreviewNode.type === CanvasNodeType.Audio) ? <CanvasMediaPreview node={mediaPreviewNode} onClose={() => setMediaPreviewNodeId(null)} /> : null}
+
                 <Modal
                     title="清空画布？"
                     open={clearConfirmOpen}
@@ -4535,6 +4554,29 @@ function FullscreenPreview({ src, alt, isPanorama, proxyGeneratedPanorama = fals
                     }}
                 />
             )}
+        </div>
+    );
+}
+
+function CanvasMediaPreview({ node, onClose }: { node: CanvasNodeData; onClose: () => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    useEffect(() => {
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+        window.addEventListener("keydown", closeOnEscape);
+        return () => window.removeEventListener("keydown", closeOnEscape);
+    }, [onClose]);
+
+    const isVideo = node.type === CanvasNodeType.Video;
+    const src = node.metadata?.content || "";
+    return (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 p-5 backdrop-blur-sm" data-canvas-no-zoom onClick={onClose}>
+            <div className={`relative w-full ${isVideo ? "max-w-5xl" : "max-w-xl"} rounded-xl border p-3 shadow-[0_24px_72px_rgba(0,0,0,0.4)]`} style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }} onClick={(event) => event.stopPropagation()}>
+                <button type="button" title="关闭预览" aria-label="关闭预览" className="absolute -right-3 -top-3 z-10 grid size-8 cursor-pointer place-items-center rounded-full border border-white/20 bg-black/70 text-white transition hover:bg-black" onClick={onClose}><X className="size-4" /></button>
+                <div className="mb-2 truncate px-1 text-sm font-medium" style={{ color: theme.node.text }}>{node.title || (isVideo ? "视频" : "音频")}</div>
+                {isVideo ? <video src={src} controls autoPlay className="max-h-[80vh] w-full rounded-lg bg-black" /> : <div className="flex min-h-36 items-center rounded-lg px-5" style={{ background: theme.node.fill }}><audio src={src} controls autoPlay className="w-full" /></div>}
+            </div>
         </div>
     );
 }
