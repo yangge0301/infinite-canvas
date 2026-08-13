@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -41,6 +41,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     });
     const scaleRef = useRef(viewport.k);
     const viewportRef = useRef(viewport);
+    const onViewportChangeRef = useRef(onViewportChange);
+    const onCanvasDeselectRef = useRef(onCanvasDeselect);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
     const gestureScaleRef = useRef(1);
@@ -51,7 +53,12 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         viewportRef.current = viewport;
     }, [viewport]);
 
-    const zoomAtPoint = (factor: number, clientX: number, clientY: number) => {
+    useEffect(() => {
+        onViewportChangeRef.current = onViewportChange;
+        onCanvasDeselectRef.current = onCanvasDeselect;
+    }, [onCanvasDeselect, onViewportChange]);
+
+    const zoomAtPoint = useCallback((factor: number, clientX: number, clientY: number) => {
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect || !Number.isFinite(factor)) return;
 
@@ -69,8 +76,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
 
         scaleRef.current = newScale;
         viewportRef.current = nextViewport;
-        onViewportChange(nextViewport);
-    };
+        onViewportChangeRef.current(nextViewport);
+    }, [containerRef]);
 
     useEffect(
         () => () => {
@@ -97,24 +104,6 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             window.removeEventListener("keyup", handleKeyUp);
         };
     }, []);
-
-    const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-        if (isCanvasControl(event.target)) return;
-
-        event.preventDefault();
-
-        if (!event.ctrlKey && !event.metaKey) {
-            const currentViewport = viewportRef.current;
-            const nextViewport = { x: currentViewport.x - event.deltaX, y: currentViewport.y - event.deltaY, k: currentViewport.k };
-            viewportRef.current = nextViewport;
-            onViewportChange(nextViewport);
-            return;
-        }
-
-        // macOS trackpad pinch is delivered as a ctrl/meta wheel gesture.
-        const delta = -event.deltaY;
-        zoomAtPoint(Math.pow(1.45, delta / 100), event.clientX, event.clientY);
-    };
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
@@ -172,7 +161,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             if (frameRef.current) return;
             frameRef.current = requestAnimationFrame(() => {
                 frameRef.current = null;
-                if (nextViewportRef.current) onViewportChange(nextViewportRef.current);
+                if (nextViewportRef.current) onViewportChangeRef.current(nextViewportRef.current);
             });
         };
 
@@ -180,7 +169,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             if (!panState.current.isPanning) return;
 
             if (!panState.current.hasMoved) {
-                onCanvasDeselect?.();
+                onCanvasDeselectRef.current?.();
             }
             panState.current.isPanning = false;
             document.body.style.cursor = "default";
@@ -192,19 +181,29 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
         };
-    }, [onCanvasDeselect, onViewportChange]);
+    }, []);
 
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
 
-        const preventWheelScroll = (event: WheelEvent) => {
+        const handleWheel = (event: WheelEvent) => {
             if (isCanvasControl(event.target)) return;
             event.preventDefault();
+            if (!event.ctrlKey && !event.metaKey) {
+                const currentViewport = viewportRef.current;
+                const nextViewport = { x: currentViewport.x - event.deltaX, y: currentViewport.y - event.deltaY, k: currentViewport.k };
+                viewportRef.current = nextViewport;
+                onViewportChangeRef.current(nextViewport);
+                return;
+            }
+
+            // macOS trackpad pinch is delivered as a ctrl/meta wheel gesture.
+            zoomAtPoint(Math.pow(1.45, -event.deltaY / 100), event.clientX, event.clientY);
         };
-        container.addEventListener("wheel", preventWheelScroll, { passive: false, capture: true });
-        return () => container.removeEventListener("wheel", preventWheelScroll, { capture: true });
-    }, [containerRef]);
+        container.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+        return () => container.removeEventListener("wheel", handleWheel, { capture: true });
+    }, [containerRef, zoomAtPoint]);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -237,7 +236,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             container.removeEventListener("gesturechange", handleGestureChange, { capture: true });
             container.removeEventListener("gestureend", preventBrowserGestureZoom, { capture: true });
         };
-    }, [containerRef, onViewportChange]);
+    }, [containerRef, zoomAtPoint]);
 
     return (
         <div
@@ -246,7 +245,6 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             style={{ background: theme.canvas.background }}
             onPointerDown={handlePointerDown}
             onDoubleClick={handleDoubleClick}
-            onWheelCapture={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}

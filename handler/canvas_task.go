@@ -537,7 +537,7 @@ func imageURLsFromAIResponse(payload []byte, contentType string, collectAll bool
 		url := candidate
 		mimeType := ""
 		var bytes int64
-		if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") {
+		if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") && !isPersistedGeneratedMediaURL(candidate) {
 			data, detectedMimeType, err := imageCandidateBytes(candidate)
 			if err != nil || len(data) == 0 {
 				continue
@@ -645,7 +645,7 @@ func collectImageCandidates(value any, depth int) []string {
 	switch typed := value.(type) {
 	case string:
 		text := strings.TrimSpace(typed)
-		if strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "data:image/") || looksLikeBase64(text) {
+		if strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || isPersistedGeneratedMediaURL(text) || strings.HasPrefix(text, "data:image/") || looksLikeBase64(text) {
 			return []string{text}
 		}
 	case []any:

@@ -28,7 +28,7 @@ func persistGeneratedMediaURLWithHeaders(rawURL string, contentType string, clie
 	if value == "" {
 		return "", "", 0, errors.New("生成结果地址为空")
 	}
-	if strings.HasPrefix(value, "/api/media/generated/") || strings.HasPrefix(value, "/api/files/") {
+	if isPersistedGeneratedMediaURL(value) {
 		return value, strings.TrimSpace(strings.Split(contentType, ";")[0]), 0, nil
 	}
 	var data []byte
@@ -97,6 +97,10 @@ func persistGeneratedMediaURLWithHeaders(rawURL string, contentType string, clie
 		}
 	}
 	return storeGeneratedMedia(data, mimeType)
+}
+
+func isPersistedGeneratedMediaURL(value string) bool {
+	return strings.HasPrefix(value, "/api/media/generated/") || strings.HasPrefix(value, "/api/files/")
 }
 
 func storeGeneratedMedia(data []byte, mimeType string) (string, string, int64, error) {
