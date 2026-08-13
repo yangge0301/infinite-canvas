@@ -29,7 +29,7 @@ type CanvasNodePromptPanelProps = {
     isRunning: boolean;
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
-    onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
+    onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<boolean | void>;
     mentionReferences?: CanvasResourceReference[];
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
@@ -69,11 +69,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const canSubmit = Boolean(prompt.trim()) || (isPanorama && (hasImageContent || mentionReferences.length > 0));
 
-    const submit = () => {
+    const submit = async () => {
         const text = prompt.trim();
         if (!canSubmit || isRunning || isImageGenerating) return;
-        onGenerate(node.id, mode, text);
-        if (!isPanorama) setPrompt("");
+        if ((await onGenerate(node.id, mode, text)) !== false) {
+            if (!isPanorama) setPrompt((current) => (current === text ? "" : current));
+        }
     };
 
     return (

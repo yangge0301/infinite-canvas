@@ -2606,12 +2606,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, [screenToCanvas]);
 
     const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string): Promise<boolean | void> => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode, modelCosts);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
-                return;
+                return false;
             }
 
             setRunningNodeId(nodeId);
@@ -2629,7 +2629,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 setRunningNodeId(null);
-                return;
+                return false;
             }
             let pendingChildIds: string[] = [];
             const generationStartedAt = Date.now();
@@ -2735,6 +2735,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         targetIds.map(async (targetId) => {
                             try {
                                 const task = await createCanvasImageTask({ ...panoramaGenerationConfig, count: "1", quality: panoramaGenerationConfig.quality === "auto" ? "medium" : panoramaGenerationConfig.quality }, panoramaPrompt, referenceImages, { nodeId: targetId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                if (canvasImageTaskFailed(task)) {
+                                    message.error(canvasImageTaskError(task));
+                                    return false;
+                                }
                                 if (task.image_url || task.url) {
                                     setNodes((prev) => {
                                         const root = prev.find((node) => node.id === rootId);
@@ -2777,7 +2781,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                 : node,
                         ),
                     );
-                    return;
+                    return taskResults.some(Boolean);
                 }
 
                 if (mode === "image") {
@@ -2840,8 +2844,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                 try {
                                     const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, { nodeId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
                                     setNodes((prev) => updateImageCandidateTask(prev, nodeId, candidateBatchId, targetId, task, generationStartedAt, imageSize));
-                                    if (canvasImageTaskFailed(task)) message.error(canvasImageTaskError(task));
-                                    return true;
+                                    const failed = canvasImageTaskFailed(task);
+                                    if (failed) message.error(canvasImageTaskError(task));
+                                    return !failed;
                                 } catch (error) {
                                     const errorDetails = error instanceof Error ? error.message : "生成失败";
                                     setNodes((prev) => updateImageCandidateError(prev, nodeId, candidateBatchId, targetId, errorDetails));
@@ -2850,7 +2855,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             }),
                         );
                         if (taskResults.some((result) => !result)) message.error(taskResults.some(Boolean) ? "部分图片任务创建失败" : "全部图片任务创建失败");
-                        return;
+                        return taskResults.some(Boolean);
                     }
                     const rootNode: CanvasNodeData = {
                         id: rootId,
@@ -2935,6 +2940,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         targetIds.map(async (targetId) => {
                             try {
                                 const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, { nodeId: targetId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                if (canvasImageTaskFailed(task)) {
+                                    message.error(canvasImageTaskError(task));
+                                    return false;
+                                }
                                 if (task.image_url || task.url) {
                                     setNodes((prev) => {
                                         const root = prev.find((node) => node.id === rootId);
@@ -2985,7 +2994,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                     : node,
                         ),
                     );
-                    return;
+                    return taskResults.some(Boolean);
                 }
 
                 if (mode === "video") {
@@ -3152,6 +3161,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } }) : node)),
                 );
+                return false;
             } finally {
                 setRunningNodeId(null);
             }
