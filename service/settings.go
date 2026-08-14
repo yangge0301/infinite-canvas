@@ -464,7 +464,8 @@ var (
 	imageModelResolutions = []string{"1k", "2k", "4k"}
 	imageModelQualities   = []string{"low", "medium", "high"}
 	videoModelRatios      = []string{"21:9", "16:9", "9:16", "4:3", "3:4", "1:1"}
-	videoModelQualities   = []string{"480p", "720p", "768p", "1080p", "2k", "4k"}
+	videoModelQualities   = []string{"480p", "720p", "768p", "1080p", "1440p", "2k", "4k"}
+	defaultVideoQualities = []string{"480p", "720p", "768p", "1080p", "2k", "4k"}
 	videoDurationOptions  = []string{"5", "10", "15", "20", "25", "30"}
 	audioModelVoices      = []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"}
 	audioModelFormats     = []string{"mp3", "wav", "opus"}
@@ -527,7 +528,11 @@ func normalizeModelCost(item model.ModelCost) model.ModelCost {
 		item.AudioSpeeds = nil
 	} else if item.Type == "video" {
 		item.Ratios = normalizeModelOptions(item.Ratios, videoModelRatios)
-		item.VideoQualities = normalizeModelOptions(item.VideoQualities, videoModelQualities)
+		if item.VideoQualities == nil {
+			item.VideoQualities = append([]string{}, defaultVideoQualities...)
+		} else {
+			item.VideoQualities = normalizeModelOptions(item.VideoQualities, videoModelQualities)
+		}
 		item.DurationOptions = normalizeModelOptions(item.DurationOptions, videoDurationOptions)
 		if item.MaxSeconds < 1 {
 			item.MaxSeconds = 15

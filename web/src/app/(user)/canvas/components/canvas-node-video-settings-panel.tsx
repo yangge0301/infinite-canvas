@@ -22,6 +22,7 @@ const qualityOptions = [
     { value: "720p", label: "720P" },
     { value: "768p", label: "768P" },
     { value: "1080p", label: "1080P" },
+    { value: "1440p", label: "1440P" },
     { value: "2k", label: "2K" },
     { value: "4k", label: "4K" },
 ] as const;
@@ -142,6 +143,7 @@ function normalizeResolution(value: string) {
     if (normalized === "480" || normalized === "480p" || normalized === "low") return "480p";
     if (normalized === "768" || normalized === "768p") return "768p";
     if (normalized === "1080" || normalized === "1080p") return "1080p";
+    if (normalized === "1440" || normalized === "1440p") return "1440p";
     if (normalized === "2k") return "2k";
     if (normalized === "4k") return "4k";
     return "720p";

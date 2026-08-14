@@ -2779,7 +2779,7 @@ function videoInputModeLimits(mode: CanvasVideoInputMode) {
 
 function normalizeVideoCapabilityQuality(value: string) {
     const normalized = normalizeResolution(value);
-    return ["480", "720", "768", "1080"].includes(normalized) ? `${normalized}p` : normalized;
+    return ["480", "720", "768", "1080", "1440"].includes(normalized) ? `${normalized}p` : normalized;
 }
 
 function videoInputModeReferences(mode: CanvasVideoInputMode, references: ReferenceImage[], firstFrame: ReferenceImage | null, lastFrame: ReferenceImage | null, videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {

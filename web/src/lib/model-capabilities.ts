@@ -24,13 +24,15 @@ export const imageRatioOptions = ["21:9", "16:9", "9:16", "1:1", "2:1", "3:2", "
 export const imageResolutionOptions = ["1k", "2k", "4k"];
 export const imageQualityOptions = ["high", "medium", "low"];
 export const videoRatioOptions = ["21:9", "16:9", "9:16", "4:3", "3:4", "1:1"];
-export const videoQualityOptions = ["480p", "720p", "768p", "1080p", "2k", "4k"];
+export const videoQualityOptions = ["480p", "720p", "768p", "1080p", "1440p", "2k", "4k"];
+const defaultVideoQualityOptions = ["480p", "720p", "768p", "1080p", "2k", "4k"];
 export const videoDurationOptions = ["5", "10", "15", "20", "25", "30"];
 export const audioVoiceOptions = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"];
 export const audioFormatOptions = ["mp3", "wav", "opus"];
 export const audioSpeedOptions = ["0.75", "1", "1.25", "1.5", "1.75", "2"];
 
-const videoQualityHeights: Record<string, number> = { "480p": 480, "720p": 720, "768p": 768, "1080p": 1080, "2k": 2048, "4k": 4096 };
+const videoQualityHeights: Record<string, number> = { "480p": 480, "720p": 720, "768p": 768, "1080p": 1080, "1440p": 1440, "2k": 2048, "4k": 4096 };
+const video1440pSizes: Record<string, string> = { "21:9": "3360x1440", "16:9": "2560x1440", "4:3": "1920x1440", "1:1": "1440x1440", "3:4": "1440x1920", "9:16": "1440x2560" };
 
 export function inferModelType(model: string): ModelType {
     const value = model.toLowerCase();
@@ -54,7 +56,7 @@ export function defaultModelCapability(model: string, type = inferModelType(mode
         fixedDuration: false,
         durationOptions: type === "video" ? ["5", "10", "15"] : [],
         maxSeconds: type === "video" ? 15 : 0,
-        videoQualities: type === "video" ? [...videoQualityOptions] : [],
+        videoQualities: type === "video" ? [...defaultVideoQualityOptions] : [],
         videoGenerateAudio: false,
         audioVoices: type === "audio" ? [...audioVoiceOptions] : [],
         audioFormats: type === "audio" ? [...audioFormatOptions] : [],
@@ -113,11 +115,12 @@ export function imageSizeForCapability(value: string, capability: ModelCapabilit
 export function videoSizeForCapability(value: string, capability: ModelCapabilityConfig, selectedQuality?: string) {
     const ratio = capabilityRatio(value, capability.ratios, "16:9");
     const quality = selectedQuality?.toLowerCase();
-    const resolution = quality && capability.videoQualities.includes(quality) ? videoQualityHeights[quality] : nearestAllowedResolution(value, capability.videoQualities, videoQualityHeights, "720p");
+    const resolution = quality && capability.videoQualities.includes(quality) ? quality : nearestAllowedResolution(value, capability.videoQualities, videoQualityHeights, "720p");
     return videoSizeForRatio(ratio, resolution);
 }
 
 export function videoSizeForRatio(ratio: string, resolution: string | number) {
+    if ((String(resolution).toLowerCase() === "1440p" || resolution === 1440) && video1440pSizes[ratio]) return video1440pSizes[ratio];
     const [width, height] = ratio.split(":").map(Number);
     const targetHeight = typeof resolution === "number" ? resolution : videoQualityHeights[resolution.toLowerCase()] || 720;
     if (!width || !height || !targetHeight) return "1280x720";
