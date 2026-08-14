@@ -9,6 +9,8 @@ import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
+import { CanvasResourceMentionTextarea } from "@/app/(user)/canvas/components/canvas-resource-mention-textarea";
+import type { CanvasResourceReference } from "@/app/(user)/canvas/utils/canvas-resource-references";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { CanvasNodeVideoSettingsPanel } from "@/app/(user)/canvas/components/canvas-node-video-settings-panel";
@@ -1239,6 +1241,22 @@ function WorkbenchPanel({
     onMoveAudioReference: (index: number, offset: number) => void;
     onGenerate: () => void;
 }) {
+    const activeInput = videoInputModeReferences(videoInputMode, references, firstFrame, lastFrame, videoReferences, audioReferences);
+    const activeIds = new Set([
+        ...activeInput.references.map((reference) => reference.id),
+        ...(activeInput.firstFrame ? [activeInput.firstFrame.id] : []),
+        ...(activeInput.lastFrame ? [activeInput.lastFrame.id] : []),
+        ...activeInput.videoReferences.map((reference) => reference.id),
+        ...activeInput.audioReferences.map((reference) => reference.id),
+    ]);
+    const promptReferences: CanvasResourceReference[] = [
+        ...references.map((reference, index) => ({ id: reference.id, nodeId: reference.id, kind: "image" as const, label: `图片${index + 1}`, title: reference.name, previewUrl: reference.dataUrl || reference.url, active: activeIds.has(reference.id) })),
+        ...(firstFrame ? [{ id: `first-frame-${firstFrame.id}`, nodeId: firstFrame.id, kind: "image" as const, label: "首帧", title: firstFrame.name, previewUrl: firstFrame.dataUrl || firstFrame.url, active: activeIds.has(firstFrame.id) }] : []),
+        ...(lastFrame ? [{ id: `last-frame-${lastFrame.id}`, nodeId: lastFrame.id, kind: "image" as const, label: "尾帧", title: lastFrame.name, previewUrl: lastFrame.dataUrl || lastFrame.url, active: activeIds.has(lastFrame.id) }] : []),
+        ...videoReferences.map((reference, index) => ({ id: reference.id, nodeId: reference.id, kind: "video" as const, label: seedanceReferenceLabel("video", index), title: reference.name, previewUrl: reference.url, active: activeIds.has(reference.id) })),
+        ...audioReferences.map((reference, index) => ({ id: reference.id, nodeId: reference.id, kind: "audio" as const, label: seedanceReferenceLabel("audio", index), title: reference.name, active: activeIds.has(reference.id) })),
+    ];
+
     return (
         <div className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800 lg:min-h-0">
             <div className="shrink-0 p-4 pb-3">
@@ -1260,7 +1278,7 @@ function WorkbenchPanel({
                             <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={onOpenPromptLibrary}>提示词库</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker()}>我的素材</Button>
                         </div>
-                        <Input.TextArea value={prompt} onChange={(event) => onPromptChange(event.target.value)} rows={6} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
+                        <CanvasResourceMentionTextarea value={prompt} references={promptReferences} onChange={onPromptChange} rows={6} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" className="min-h-[144px] w-full resize-none rounded-md border border-stone-200 bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-stone-400 dark:border-stone-800 dark:focus:border-stone-600" />
                     </div>
                 </WorkbenchSection>
                 {videoInputMode === "image-to-video" ? (

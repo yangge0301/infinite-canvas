@@ -80,7 +80,7 @@ export function configuredModelCapability(configs: ModelCapabilityConfig[] | und
         resolutions: capabilityList(configured.resolutions, defaults.resolutions),
         qualities: capabilityList(configured.qualities, defaults.qualities),
         durationOptions: capabilityList(configured.durationOptions, defaults.durationOptions),
-        videoQualities: capabilityList(configured.videoQualities, defaults.videoQualities),
+        videoQualities: capabilityList(configured.videoQualities, configured.type === "video" ? videoQualityOptions : defaults.videoQualities),
         audioVoices: capabilityList(configured.audioVoices, defaults.audioVoices),
         audioFormats: capabilityList(configured.audioFormats, defaults.audioFormats),
         audioSpeeds: capabilityList(configured.audioSpeeds, defaults.audioSpeeds),

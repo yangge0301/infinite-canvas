@@ -30,6 +30,8 @@ import { saveAs } from "file-saver";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
+import { CanvasResourceMentionTextarea } from "@/app/(user)/canvas/components/canvas-resource-mention-textarea";
+import type { CanvasResourceReference } from "@/app/(user)/canvas/utils/canvas-resource-references";
 import { CanvasNodeImageSettingsPanel } from "@/app/(user)/canvas/components/canvas-node-image-settings-panel";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -1273,6 +1275,16 @@ function WorkbenchPanel({
     onGenerate: () => void;
     uploadingCount: number;
 }) {
+    const promptReferences: CanvasResourceReference[] = references.map((reference, index) => ({
+        id: reference.id,
+        nodeId: reference.id,
+        kind: "image",
+        label: `图片${index + 1}`,
+        title: reference.name,
+        previewUrl: reference.dataUrl || reference.url,
+        active: true,
+    }));
+
     return (
         <div className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800 lg:min-h-0">
             <div className="shrink-0 p-4 pb-3">
@@ -1290,7 +1302,7 @@ function WorkbenchPanel({
                             <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={onOpenPromptLibrary}>提示词库</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onOpenAssetPicker}>我的素材</Button>
                         </div>
-                        <Input.TextArea value={prompt} onChange={(event) => onPromptChange(event.target.value)} rows={6} placeholder="描述画面主体、风格、构图、光线和用途" />
+                        <CanvasResourceMentionTextarea value={prompt} references={promptReferences} onChange={onPromptChange} rows={6} placeholder="描述画面主体、风格、构图、光线和用途" className="min-h-[144px] w-full resize-none rounded-md border border-stone-200 bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-stone-400 dark:border-stone-800 dark:focus:border-stone-600" />
                     </div>
                 </section>
 
@@ -2683,6 +2695,5 @@ function buildLog({
 function formatLogTime(value: number) {
     return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
-
 
 
