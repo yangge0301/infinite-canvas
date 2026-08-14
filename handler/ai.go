@@ -228,6 +228,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 type aiLogContext struct {
 	StartedAt       time.Time
 	Endpoint        string
+	RequestURL      string
 	Method          string
 	Model           string
 	Channel         model.ModelChannel
@@ -238,6 +239,7 @@ type aiLogContext struct {
 }
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.ModelChannel, logContext aiLogContext, onFailure func()) {
+	logContext.RequestURL = request.URL.String()
 	response, err := service.HTTPClientForChannel(channel).Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
@@ -350,6 +352,7 @@ func saveAIProxyLog(context aiLogContext, status int, responseBody string, error
 		UserID:          context.UserID,
 		UserDisplayName: context.UserDisplayName,
 		Endpoint:        context.Endpoint,
+		RequestURL:      context.RequestURL,
 		Method:          context.Method,
 		Model:           context.Model,
 		ChannelID:       context.Channel.ID,

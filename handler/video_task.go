@@ -121,6 +121,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	logContext := aiLogContext{
 		StartedAt:       startedAt,
 		Endpoint:        "/videos",
+		RequestURL:      request.URL.String(),
 		Method:          http.MethodPost,
 		Model:           modelName,
 		Channel:         channel,
@@ -325,6 +326,7 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	logContext := aiLogContext{
 		StartedAt:       startedAt,
 		Endpoint:        endpoint,
+		RequestURL:      request.URL.String(),
 		Method:          http.MethodGet,
 		Model:           task.Model,
 		Channel:         channel,

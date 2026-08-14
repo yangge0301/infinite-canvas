@@ -284,6 +284,7 @@ export type AdminAICallLog = {
     userId: string;
     userDisplayName: string;
     endpoint: string;
+    requestUrl: string;
     method: string;
     model: string;
     channelId: string;

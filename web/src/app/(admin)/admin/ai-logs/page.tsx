@@ -1,6 +1,6 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EyeOutlined, LinkOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { App, Button, Card, Flex, Form, Input, InputNumber, Modal, Space, Switch, Table, Tag, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
@@ -93,6 +93,7 @@ export default function AdminAICallLogsPage() {
             { title: "时间", dataIndex: "createdAt", width: 170, render: (value: string) => formatTime(value) },
             { title: "用户", dataIndex: "userDisplayName", width: 150, render: (_: string, item: AdminAICallLog) => item.userDisplayName || item.userId || "-" },
             { title: "接口", dataIndex: "endpoint", width: 170 },
+            { title: "请求地址", dataIndex: "requestUrl", width: 260, ellipsis: true, render: (value: string) => value || "-" },
             { title: "模型", dataIndex: "model", width: 180, ellipsis: true },
             { title: "渠道", dataIndex: "channelName", width: 150, ellipsis: true, render: (_: string, item: AdminAICallLog) => item.channelName || item.channelId || "-" },
             { title: "状态", dataIndex: "status", width: 90, render: (status: number) => <Tag color={status >= 200 && status < 400 ? "success" : "error"}>{status || "失败"}</Tag> },
@@ -101,10 +102,11 @@ export default function AdminAICallLogsPage() {
             {
                 title: "操作",
                 key: "actions",
-                width: 180,
+                width: 190,
                 fixed: "right" as const,
                 render: (_: unknown, item: AdminAICallLog) => (
                     <Space size={6}>
+                        <Button size="small" title="查看请求地址" aria-label="查看请求地址" icon={<LinkOutlined />} disabled={!item.requestUrl} onClick={() => setDetail({ title: "请求地址", value: item.requestUrl })} />
                         <Button size="small" icon={<EyeOutlined />} onClick={() => setDetail({ title: "请求详情", value: item.requestBody })}>
                             请求详情
                         </Button>
@@ -130,7 +132,7 @@ export default function AdminAICallLogsPage() {
                         }}
                     >
                         <div className="flex flex-wrap items-center gap-3">
-                            <Input className="min-w-[280px] flex-1 lg:max-w-[460px]" value={keyword} placeholder="搜索用户、模型、渠道、接口或错误" onChange={(event) => setKeyword(event.target.value)} />
+                            <Input className="min-w-[280px] flex-1 lg:max-w-[460px]" value={keyword} placeholder="搜索用户、模型、渠道、接口、请求地址或错误" onChange={(event) => setKeyword(event.target.value)} />
                             <Button htmlType="submit" type="primary" icon={<SearchOutlined />}>
                                 查询
                             </Button>

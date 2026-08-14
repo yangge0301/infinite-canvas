@@ -66,6 +66,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
+	requestURL := httpRequest.URL.String()
 
 	client := &http.Client{Timeout: time.Duration(maxInt(channel.Timeout, 600)) * time.Second}
 	response, err := client.Do(httpRequest)
@@ -75,6 +76,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 			UserID:          user.ID,
 			UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
 			Endpoint:        "/workflows/agent-draft",
+			RequestURL:      requestURL,
 			Method:          http.MethodPost,
 			Model:           modelName,
 			ChannelID:       channel.ID,
@@ -96,6 +98,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 			UserID:          user.ID,
 			UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
 			Endpoint:        "/workflows/agent-draft",
+			RequestURL:      requestURL,
 			Method:          http.MethodPost,
 			Model:           modelName,
 			ChannelID:       channel.ID,
@@ -118,6 +121,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 			UserID:          user.ID,
 			UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
 			Endpoint:        "/workflows/agent-draft",
+			RequestURL:      requestURL,
 			Method:          http.MethodPost,
 			Model:           modelName,
 			ChannelID:       channel.ID,
@@ -136,6 +140,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 		UserID:          user.ID,
 		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
 		Endpoint:        "/workflows/agent-draft",
+		RequestURL:      requestURL,
 		Method:          http.MethodPost,
 		Model:           modelName,
 		ChannelID:       channel.ID,
@@ -178,13 +183,13 @@ func workflowDraftModel(modelName string) (string, error) {
 func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
 	if request.ChannelMode == "local" {
 		channel := model.ModelChannel{
-			ID:       strings.TrimSpace(request.ChannelID),
-			Name:     "用户本地直连",
-			BaseURL:  strings.TrimSpace(request.BaseURL),
-			APIKey:   strings.TrimSpace(request.APIKey),
-			Models:   []string{modelName},
-			Weight:   1,
-			Timeout:  600,
+			ID:      strings.TrimSpace(request.ChannelID),
+			Name:    "用户本地直连",
+			BaseURL: strings.TrimSpace(request.BaseURL),
+			APIKey:  strings.TrimSpace(request.APIKey),
+			Models:  []string{modelName},
+			Weight:  1,
+			Timeout: 600,
 		}
 		if channel.BaseURL == "" || channel.APIKey == "" {
 			return model.ModelChannel{}, safeMessageError{message: "文本模型本地直连渠道配置不完整"}
@@ -324,5 +329,3 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
-
-

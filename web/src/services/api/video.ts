@@ -604,6 +604,7 @@ async function writeVideoAICallLog(config: AiConfig, model: string, endpoint: st
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
             endpoint,
+            requestUrl: aiApiUrl(config, endpoint),
             method,
             model,
             channelId: channel?.id || config.activeChannelId || "",

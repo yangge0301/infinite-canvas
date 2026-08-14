@@ -5,6 +5,7 @@ type AICallLog struct {
 	UserID          string `json:"userId" gorm:"index"`
 	UserDisplayName string `json:"userDisplayName" gorm:"->;-:migration"`
 	Endpoint        string `json:"endpoint" gorm:"index"`
+	RequestURL      string `json:"requestUrl" gorm:"type:text"`
 	Method          string `json:"method"`
 	Model           string `json:"model" gorm:"index"`
 	ChannelID       string `json:"channelId" gorm:"index"`

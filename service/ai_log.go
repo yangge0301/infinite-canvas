@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,11 +16,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 	"github.com/tigerowo/infinite-canvas/config"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/repository"
-	"github.com/google/uuid"
-	"github.com/robfig/cron/v3"
 )
 
 const (
@@ -45,6 +46,7 @@ type AICallLogInput struct {
 	UserID          string `json:"userId"`
 	UserDisplayName string `json:"userDisplayName"`
 	Endpoint        string `json:"endpoint"`
+	RequestURL      string `json:"requestUrl"`
 	Method          string `json:"method"`
 	Model           string `json:"model"`
 	ChannelID       string `json:"channelId"`
@@ -65,6 +67,7 @@ func SaveAICallLog(input AICallLogInput) {
 		UserID:          strings.TrimSpace(input.UserID),
 		UserDisplayName: strings.TrimSpace(input.UserDisplayName),
 		Endpoint:        strings.TrimSpace(input.Endpoint),
+		RequestURL:      sanitizeAICallRequestURL(input.RequestURL),
 		Method:          strings.TrimSpace(input.Method),
 		Model:           strings.TrimSpace(input.Model),
 		ChannelID:       strings.TrimSpace(input.ChannelID),
@@ -296,13 +299,31 @@ func startOfDay(value time.Time) time.Time {
 }
 
 func aiLogMatchesKeyword(item model.AICallLog, keyword string) bool {
-	fields := []string{item.UserID, item.UserDisplayName, item.Endpoint, item.Method, item.Model, item.ChannelID, item.ChannelName, item.RequestBody, item.ResponseBody, item.Error, strconv.Itoa(item.Status)}
+	fields := []string{item.UserID, item.UserDisplayName, item.Endpoint, item.RequestURL, item.Method, item.Model, item.ChannelID, item.ChannelName, item.RequestBody, item.ResponseBody, item.Error, strconv.Itoa(item.Status)}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(field), keyword) {
 			return true
 		}
 	}
 	return false
+}
+
+func sanitizeAICallRequestURL(value string) string {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return strings.TrimSpace(value)
+	}
+	parsed.User = nil
+	query := parsed.Query()
+	for key := range query {
+		normalized := strings.NewReplacer("-", "", "_", "").Replace(strings.ToLower(key))
+		if strings.Contains(normalized, "key") || strings.Contains(normalized, "token") || strings.Contains(normalized, "secret") || strings.Contains(normalized, "authorization") || strings.Contains(normalized, "signature") {
+			query.Set(key, "[redacted]")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func normalizeAICallResponseLog(responseBody string, errorMessage string) string {

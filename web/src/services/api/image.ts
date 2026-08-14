@@ -613,6 +613,7 @@ async function writeLocalAICallLog(config: AiConfig, endpoint: string, startedAt
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
             endpoint,
+            requestUrl: localAICallRequestURL(config, endpoint),
             method: "POST",
             model: config.model,
             channelId: channel?.id || config.activeChannelId || "",
@@ -625,6 +626,13 @@ async function writeLocalAICallLog(config: AiConfig, endpoint: string, startedAt
             error,
         }),
     }).catch(() => { });
+}
+
+function localAICallRequestURL(config: AiConfig, endpoint: string) {
+    const channel = localChannelForActiveModel(config);
+    return isGeminiChannelForConfig(config)
+        ? geminiApiUrl(channel?.baseUrl || config.baseUrl, config.model, "generateContent")
+        : aiApiUrl(config, endpoint);
 }
 
 function stringifyLogPayload(value: unknown) {
