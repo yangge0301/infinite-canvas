@@ -121,13 +121,6 @@ export default function VideoPage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const videoConfig = useMemo(() => ({ ...effectiveConfig, size: effectiveConfig.videoSize }), [effectiveConfig]);
-    const updateVideoConfig = useCallback<UpdateAiConfig>((key, value) => {
-        if (key === "size") {
-            updateConfig("videoSize", String(value));
-            return;
-        }
-        updateConfig(key, value);
-    }, [updateConfig]);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -142,7 +135,6 @@ export default function VideoPage() {
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
-    const [running, setRunning] = useState(false);
     const [videoInputMode, setVideoInputMode] = useState<CanvasVideoInputMode>("text-to-video");
     const [videoBitrate, setVideoBitrate] = useState<"standard" | "high">("high");
     const [referenceUploadTarget, setReferenceUploadTarget] = useState<ReferenceUploadTarget>("all");
@@ -160,9 +152,26 @@ export default function VideoPage() {
     const pollingLogIdsRef = useRef(new Set<string>());
     const logsRef = useRef<GenerationLog[]>([]);
     const effectiveConfigRef = useRef(videoConfig);
+    const workbenchDefaultsInitializedRef = useRef(false);
 
-    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const publicSettings = useConfigStore((state) => state.publicSettings);
+    const modelCosts = publicSettings?.modelChannel.modelCosts;
     const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const applyVideoWorkbenchDefaults = useCallback((nextModel: string) => {
+        const defaults = videoWorkbenchDefaults(modelCosts, nextModel);
+        updateConfig("videoSize", defaults.size);
+        updateConfig("vquality", defaults.vquality);
+        updateConfig("videoSeconds", defaults.videoSeconds);
+        setVideoBitrate("high");
+    }, [modelCosts, updateConfig]);
+    const updateVideoConfig = useCallback<UpdateAiConfig>((key, value) => {
+        if (key === "size") {
+            updateConfig("videoSize", String(value));
+            return;
+        }
+        updateConfig(key, value);
+        if (key === "videoModel") applyVideoWorkbenchDefaults(String(value));
+    }, [applyVideoWorkbenchDefaults, updateConfig]);
     const videoCapability = modelCapabilityFor(modelCosts, model);
     const normalizedVideoConfig = normalizeVideoWorkbenchConfig(videoConfig, modelCosts, model);
     const credits = requestCreditCost({ channelMode: normalizedVideoConfig.channelMode, modelCosts, model, count: 1, seconds: normalizedVideoConfig.videoSeconds }) * taskCount;
@@ -170,6 +179,12 @@ export default function VideoPage() {
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const pendingLogCount = logs.filter((log) => log.status === "生成中" && log.task && !log.video).length;
     const usesBackendVideoTasks = (value: AiConfig) => value.channelMode === "remote" || (value.channelMode === "local" && Boolean(token));
+
+    useEffect(() => {
+        if (!publicSettings || workbenchDefaultsInitializedRef.current) return;
+        workbenchDefaultsInitializedRef.current = true;
+        applyVideoWorkbenchDefaults(model);
+    }, [applyVideoWorkbenchDefaults, model, publicSettings]);
 
     const restorePendingLogResults = (sourceLogs: GenerationLog[]) => {
         const pendingLogs = sourceLogs.filter((log) => log.status === "生成中" && log.task && !log.video);
@@ -574,7 +589,6 @@ export default function VideoPage() {
     const generate = async () => {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
-        setPrompt("");
         await submitGenerationSnapshot(snapshot);
     };
 
@@ -631,7 +645,6 @@ export default function VideoPage() {
     };
 
     const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number; videoInputMode: CanvasVideoInputMode; videoBitrate: "standard" | "high" }) => {
-        setRunning(true);
         setPreviewLog(null);
         setNow(Date.now());
         const pendingLogs = Array.from({ length: snapshot.taskCount }, () => {
@@ -642,20 +655,16 @@ export default function VideoPage() {
         await Promise.all(pendingLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
         setLogs((value) => sortVideoLogs([...pendingLogs, ...value]));
         setResults((value) => sortVideoResults([...pendingLogs.map((log) => createResultFromLog(log, "pending")), ...value]));
-        try {
-            const settled = await Promise.allSettled(pendingLogs.map((log) => runVideoTask(log, snapshot)));
-            const nextLogs = settled
-                .map((item) => (item.status === "fulfilled" ? item.value : null))
-                .filter((item): item is NonNullable<typeof item> => Boolean(item));
-            const storedLogs = await readStoredLogs();
-            setLogs(storedLogs);
-            const createdCount = nextLogs.filter((item) => item.status === "生成中").length;
-            const failedCount = nextLogs.filter((item) => item.status === "失败").length;
-            createdCount ? message.success(`已创建 ${createdCount} 个视频任务`) : message.error("视频任务创建失败");
-            if (failedCount) message.warning(`${failedCount} 个视频任务创建失败`);
-        } finally {
-            setRunning(false);
-        }
+        const settled = await Promise.allSettled(pendingLogs.map((log) => runVideoTask(log, snapshot)));
+        const nextLogs = settled
+            .map((item) => (item.status === "fulfilled" ? item.value : null))
+            .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        const storedLogs = await readStoredLogs();
+        setLogs(storedLogs);
+        const createdCount = nextLogs.filter((item) => item.status === "生成中").length;
+        const failedCount = nextLogs.filter((item) => item.status === "失败").length;
+        createdCount ? message.success(`已创建 ${createdCount} 个视频任务`) : message.error("视频任务创建失败");
+        if (failedCount) message.warning(`${failedCount} 个视频任务创建失败`);
     };
 
     const runVideoTask = async (pendingLog: GenerationLog, snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number; videoInputMode: CanvasVideoInputMode; videoBitrate: "standard" | "high" }) => {
@@ -853,6 +862,7 @@ export default function VideoPage() {
         setLastFrame(null);
         setVideoReferences([]);
         setAudioReferences([]);
+        applyVideoWorkbenchDefaults(model);
         updateConfig("videoElementList", defaultKlingElementList());
         setResults([]);
         setSelectedLogIds([]);
@@ -1044,7 +1054,6 @@ export default function VideoPage() {
                     videoBitrate={videoBitrate}
                     credits={credits}
                     canGenerate={canGenerate}
-                    running={running}
                     pendingCount={pendingCount}
                     taskCount={taskCount}
                     onTaskCountChange={setTaskCount}
@@ -1163,7 +1172,6 @@ function WorkbenchPanel({
     videoBitrate,
     credits,
     canGenerate,
-    running,
     pendingCount,
     taskCount,
     onTaskCountChange,
@@ -1204,7 +1212,6 @@ function WorkbenchPanel({
     videoBitrate: "standard" | "high";
     credits: number;
     canGenerate: boolean;
-    running: boolean;
     pendingCount: number;
     taskCount: number;
     onTaskCountChange: (value: number) => void;
@@ -1320,7 +1327,7 @@ function WorkbenchPanel({
                 </WorkbenchSection>
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
-                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate} onClick={onGenerate}>
+                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
                     <span className="inline-flex items-center gap-1.5"><CreditSymbol />{credits.toLocaleString()} {pendingCount ? `继续提交（${pendingCount} 个生成中）` : "开始生成"}</span>
                 </Button>
             </div>
@@ -2743,6 +2750,22 @@ function normalizeVideoWorkbenchConfig(config: AiConfig, modelCosts: Parameters<
         vquality,
         videoSeconds,
         videoGenerateAudio: capability.videoGenerateAudio && config.videoGenerateAudio === "true" ? "true" : "false",
+    };
+}
+
+function videoWorkbenchDefaults(modelCosts: Parameters<typeof modelCapabilityFor>[0], model: string) {
+    const capability = modelCapabilityFor(modelCosts, model);
+    const ratios = capability.ratios.length ? capability.ratios : ["21:9"];
+    const qualities = capability.videoQualities.length ? capability.videoQualities : ["720p"];
+    const ratio = firstAllowed("21:9", ratios, ratios[0]);
+    const vquality = firstAllowed("720p", qualities, qualities[0]);
+    const videoSeconds = capability.fixedDuration
+        ? firstAllowed("5", capability.durationOptions, capability.durationOptions[0] || "5")
+        : String(Math.max(1, Math.min(capability.maxSeconds || 15, 5)));
+    return {
+        size: videoSizeForCapability(ratio, { ...capability, ratios, videoQualities: qualities }, vquality),
+        vquality,
+        videoSeconds,
     };
 }
 

@@ -22,7 +22,7 @@ import {
     Upload,
     WandSparkles,
 } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
@@ -163,9 +163,21 @@ export default function ImagePage() {
     const pollingLogIdsRef = useRef(new Set<string>());
     const logsRef = useRef<GenerationLog[]>([]);
     const effectiveConfigRef = useRef(effectiveConfig);
+    const workbenchDefaultsInitializedRef = useRef(false);
 
-    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const publicSettings = useConfigStore((state) => state.publicSettings);
+    const modelCosts = publicSettings?.modelChannel.modelCosts;
     const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const applyImageWorkbenchDefaults = useCallback((nextModel: string) => {
+        const defaults = imageWorkbenchDefaults(modelCosts, nextModel);
+        updateConfig("size", defaults.size);
+        updateConfig("quality", defaults.quality);
+        updateConfig("count", defaults.count);
+    }, [modelCosts, updateConfig]);
+    const updateImageConfig = useCallback<UpdateAiConfig>((key, value) => {
+        updateConfig(key, value);
+        if (key === "imageModel") applyImageWorkbenchDefaults(String(value));
+    }, [applyImageWorkbenchDefaults, updateConfig]);
     const imageConfig = normalizeImageWorkbenchConfig(effectiveConfig, modelCosts, model);
     const imageCapability = modelCapabilityFor(modelCosts, model);
     const canGenerate = Boolean(prompt.trim());
@@ -175,6 +187,12 @@ export default function ImagePage() {
     const pendingLogCount = logs.filter((log) => log.status === "生成中" && log.task && !log.images.length).length;
     const usesBackendImageTasks = (value: AiConfig) => value.channelMode === "remote" || (value.channelMode === "local" && Boolean(token));
     const imageTaskConfig = () => normalizeImageWorkbenchConfig(effectiveConfigRef.current, useConfigStore.getState().publicSettings?.modelChannel.modelCosts, effectiveConfigRef.current.imageModel || effectiveConfigRef.current.model);
+
+    useEffect(() => {
+        if (!publicSettings || workbenchDefaultsInitializedRef.current) return;
+        workbenchDefaultsInitializedRef.current = true;
+        applyImageWorkbenchDefaults(model);
+    }, [applyImageWorkbenchDefaults, model, publicSettings]);
 
     const restorePendingLogResults = (sourceLogs: GenerationLog[]) => {
         const pendingLogs = sourceLogs.filter((log) => log.status === "生成中" && log.task && !log.images.length);
@@ -397,7 +415,6 @@ export default function ImagePage() {
         const currentImage = reuseImageAsReference ? latestGeneratedImage(results, logs) : undefined;
         const snapshot = buildRequestSnapshot({ referenceItems: currentImage && references.length < MAX_REFERENCE_IMAGES && !references.some((item) => sameImageReference(item, currentImage)) ? [...references, imageReferenceFromGenerated(currentImage)] : references });
         if (!snapshot) return;
-        setPrompt("");
         await submitGenerationBatch(snapshot);
     };
 
@@ -681,6 +698,7 @@ export default function ImagePage() {
     const createSession = () => {
         setPrompt("");
         setReferences([]);
+        applyImageWorkbenchDefaults(model);
         setResults((value) => value.filter((item) => item.status === "pending"));
         setSelectedLogIds([]);
         setPreviewLog(null);
@@ -1099,7 +1117,7 @@ export default function ImagePage() {
                     canGenerate={canGenerate}
                     pendingCount={pendingCount}
                     reuseImageAsReference={reuseImageAsReference}
-                    updateConfig={updateConfig}
+                    updateConfig={updateImageConfig}
                     openConfigDialog={openConfigDialog}
                     onReuseImageAsReferenceChange={setReuseImageAsReference}
                     onPromptChange={setPrompt}
@@ -2521,6 +2539,20 @@ function normalizeImageWorkbenchConfig(config: AiConfig, modelCosts: Parameters<
     };
 }
 
+function imageWorkbenchDefaults(modelCosts: Parameters<typeof modelCapabilityFor>[0], model: string) {
+    const capability = modelCapabilityFor(modelCosts, model);
+    const ratios = capability.ratios.length ? capability.ratios : ["21:9"];
+    const resolutions = capability.resolutions.length ? capability.resolutions : ["1k"];
+    const qualities = capability.qualities.length ? capability.qualities : ["medium"];
+    const ratio = firstAllowed("21:9", ratios, ratios[0]);
+    const resolution = firstAllowed("2k", resolutions, resolutions[0]);
+    return {
+        size: imageSizeForCapability(`${ratio}-${resolution}`, { ...capability, ratios, resolutions }),
+        quality: firstAllowed("medium", qualities, qualities[0]),
+        count: "1",
+    };
+}
+
 function latestGeneratedImage(results: GenerationResult[], logs: GenerationLog[]) {
     return [
         ...results.filter((item) => item.status === "success" && item.image).map((item) => ({ image: item.image!, createdAt: item.createdAt })),
@@ -2651,8 +2683,6 @@ function buildLog({
 function formatLogTime(value: number) {
     return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
-
-
 
 
 
