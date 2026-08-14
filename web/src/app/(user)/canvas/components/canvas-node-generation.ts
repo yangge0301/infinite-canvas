@@ -7,6 +7,7 @@ import type { VideoElementItem, VideoElementReference, VideoMultiPromptItem } fr
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasVideoInputMode } from "../types";
 import { isCanvasImageNodeType } from "../utils/canvas-panorama";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
+import { modelCapabilityFor, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -33,13 +34,13 @@ export type NodeGenerationInput = {
     audio?: ReferenceAudio;
 };
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, modelCosts?: ModelCapabilityConfig[]): NodeGenerationContext {
     const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = nodes.find((node) => node.id === nodeId);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt, sourceNode);
     }
-    if (sourceNode?.type === CanvasNodeType.Video && sourceNode.metadata?.videoInputMode) return buildVideoInputModeGenerationContext(sourceNode, inputs, prompt);
+    if (sourceNode?.type === CanvasNodeType.Video && sourceNode.metadata?.videoInputMode) return buildVideoInputModeGenerationContext(sourceNode, inputs, prompt, modelCosts);
 
     const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
     const upstreamText = sourceNode?.metadata?.excludeUpstreamText? "": inputs
@@ -48,7 +49,8 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
             .filter(Boolean)
             .join("\n\n");
     const allReferenceImages = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
-    const referenceImages = sourceNode?.type === CanvasNodeType.Image ? allReferenceImages.slice(0, 16) : allReferenceImages;
+    const imageReferenceLimit = sourceNode?.type === CanvasNodeType.Image ? modelCapabilityFor(modelCosts, sourceNode.metadata?.model || "image").referenceImageCount : allReferenceImages.length;
+    const referenceImages = sourceNode?.type === CanvasNodeType.Image ? allReferenceImages.slice(0, imageReferenceLimit) : allReferenceImages;
     const referenceVideos = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
     const frameReferences = readFrameReferences(sourceNode, inputs);
@@ -71,7 +73,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     };
 }
 
-function buildVideoInputModeGenerationContext(sourceNode: CanvasNodeData, inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
+function buildVideoInputModeGenerationContext(sourceNode: CanvasNodeData, inputs: NodeGenerationInput[], prompt: string, modelCosts?: ModelCapabilityConfig[]): NodeGenerationContext {
     const mode: CanvasVideoInputMode = sourceNode.metadata?.videoInputMode || "text-to-video";
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const preferredIds = [...(sourceNode.metadata?.videoReferenceNodeIds || []), sourceNode.metadata?.firstFrameNodeId || "", sourceNode.metadata?.lastFrameNodeId || ""];
@@ -79,6 +81,7 @@ function buildVideoInputModeGenerationContext(sourceNode: CanvasNodeData, inputs
     const images = references.filter((input) => input.image);
     const videos = references.filter((input) => input.video);
     const audios = references.filter((input) => input.audio);
+    const capability = modelCapabilityFor(modelCosts, sourceNode.metadata?.model || "video");
     const base = {
         prompt,
         videoMultiPrompt: [],
@@ -101,9 +104,9 @@ function buildVideoInputModeGenerationContext(sourceNode: CanvasNodeData, inputs
         return { ...base, referenceImages: [], firstFrame, lastFrame, referenceVideos: [], referenceAudios: [], imageCount: Number(Boolean(firstFrame)) + Number(Boolean(lastFrame)) };
     }
     if (mode === "all-reference") {
-        const referenceImages = images.flatMap((input) => input.image ? [input.image] : []).slice(0, 9);
-        const referenceVideos = videos.flatMap((input) => input.video ? [input.video] : []).slice(0, 3);
-        const referenceAudios = audios.flatMap((input) => input.audio ? [input.audio] : []).slice(0, 3);
+        const referenceImages = images.flatMap((input) => input.image ? [input.image] : []).slice(0, capability.referenceImageCount);
+        const referenceVideos = videos.flatMap((input) => input.video ? [input.video] : []).slice(0, capability.referenceVideoCount);
+        const referenceAudios = audios.flatMap((input) => input.audio ? [input.audio] : []).slice(0, capability.referenceAudioCount);
         return { ...base, referenceImages, firstFrame: null, lastFrame: null, referenceVideos, referenceAudios, imageCount: referenceImages.length, videoCount: referenceVideos.length, audioCount: referenceAudios.length };
     }
     if (mode === "video-continuation") {

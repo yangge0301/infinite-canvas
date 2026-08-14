@@ -1744,6 +1744,25 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         }
         const target = nodesRef.current.find((node) => node.id === targetNodeId);
         if (!target || target.type !== CanvasNodeType.Video) return;
+        const capability = modelCapabilityFor(modelCosts, target.metadata?.model || effectiveConfig.videoModel || "video");
+        const limits = mode === "all-reference"
+            ? { image: capability.referenceImageCount, video: capability.referenceVideoCount, audio: capability.referenceAudioCount }
+            : mode === "image-to-video"
+                ? { image: 1, video: 0, audio: 0 }
+                : mode === "video-continuation"
+                    ? { image: 0, video: 1, audio: 0 }
+                    : { image: 0, video: 0, audio: 0 };
+        const connectedCounts = connectionsRef.current.filter((connection) => connection.toNodeId === targetNodeId).reduce((counts, connection) => {
+            const source = nodesRef.current.find((node) => node.id === connection.fromNodeId);
+            if (source && source.type === CanvasNodeType.Image) counts.image += 1;
+            if (source?.type === CanvasNodeType.Video) counts.video += 1;
+            if (source?.type === CanvasNodeType.Audio) counts.audio += 1;
+            return counts;
+        }, { image: 0, video: 0, audio: 0 });
+        if (mode === "all-reference" && connectedCounts[kind] >= limits[kind]) {
+            message.warning(`当前模型最多参考${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}${limits[kind]}${kind === "image" ? "张" : "个"}`);
+            return;
+        }
         const existingIds = target.metadata?.videoReferenceNodeIds || [];
         const referenceIndex = existingIds.length;
         const hideLoading = message.loading(`正在上传${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}...`, 0);
@@ -1811,7 +1830,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         } finally {
             hideLoading();
         }
-    }, [message]);
+    }, [effectiveConfig.videoModel, message, modelCosts]);
 
     const handleVideoReferenceRemove = useCallback((targetNodeId: string, slot: CanvasVideoReferenceSlot, resourceNodeId: string) => {
         setNodes((prev) => prev.map((node) => {
@@ -2776,7 +2795,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
             const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt),
+                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt, modelCosts),
             );
             const effectivePrompt = generationContext.prompt.trim();
             const requestPrompt =
@@ -3330,7 +3349,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, openConfigDialog],
+        [effectiveConfig, modelCosts, openConfigDialog],
     );
 
     const getCanvasAgentContext = useCallback(
@@ -3763,7 +3782,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 return;
             }
 
-            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
+            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || "", modelCosts));
             const prompt = (isPanorama ? savedImageMetadata?.panoramaFinalPrompt || "" : savedImageMetadata?.prompt || context?.prompt || "").trim();
             const requestPrompt = isPanorama ? prompt : applyCameraPrompt(prompt, savedImageMetadata?.cameraControl || node.metadata?.cameraControl);
             if (!prompt) {
@@ -3779,7 +3798,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "参考图片已丢失，无法继续重试" } } : item)));
                 return;
             }
-            const retryImages = retryReferenceImages || [];
+            const retryImages = isCanvasImageNodeType(node.type) ? (retryReferenceImages || []).slice(0, modelCapabilityFor(modelCosts, generationConfig.model).referenceImageCount) : retryReferenceImages || [];
 
             setRunningNodeId(node.id);
             const retryStartedAt = Date.now();
@@ -3850,7 +3869,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, message, openConfigDialog, projectId],
+        [effectiveConfig, message, modelCosts, openConfigDialog, projectId],
     );
 
     const generateImageFromTextNode = useCallback(

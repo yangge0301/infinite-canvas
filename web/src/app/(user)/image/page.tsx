@@ -126,7 +126,6 @@ const CATEGORY_STORE_KEY = "infinite-canvas:image_generation_categories";
 const RESULT_VIEW_MODE_KEY = "infinite-canvas:image-result-view-mode";
 const IMAGE_TASK_POLL_INTERVAL_MS = 10000;
 const WORKFLOW_BUTTON_POSITION_KEY = "infinite-canvas:workflow-button-position";
-const MAX_REFERENCE_IMAGES = 16;
 const WORKFLOW_BUTTON_INITIAL_POSITION = { x: 24, y: 320 };
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
 const categoryStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_categories" });
@@ -182,12 +181,17 @@ export default function ImagePage() {
     }, [applyImageWorkbenchDefaults, updateConfig]);
     const imageConfig = normalizeImageWorkbenchConfig(effectiveConfig, modelCosts, model);
     const imageCapability = modelCapabilityFor(modelCosts, model);
+    const maxReferenceImages = Math.max(0, Math.floor(imageCapability.referenceImageCount));
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Number(imageConfig.count) || 1);
     const credits = requestCreditCost({ channelMode: imageConfig.channelMode, modelCosts, model, count: imageConfig.count });
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const pendingLogCount = logs.filter((log) => log.status === "生成中" && log.task && !log.images.length).length;
     const usesBackendImageTasks = (value: AiConfig) => value.channelMode === "remote" || (value.channelMode === "local" && Boolean(token));
+
+    useEffect(() => {
+        setReferences((value) => value.slice(0, maxReferenceImages));
+    }, [maxReferenceImages]);
     const imageTaskConfig = () => normalizeImageWorkbenchConfig(effectiveConfigRef.current, useConfigStore.getState().publicSettings?.modelChannel.modelCosts, effectiveConfigRef.current.imageModel || effectiveConfigRef.current.model);
 
     useEffect(() => {
@@ -318,14 +322,14 @@ export default function ImagePage() {
     };
 
     const addReferences = async (files?: FileList | null) => {
-        const remaining = MAX_REFERENCE_IMAGES - references.length;
+        const remaining = maxReferenceImages - references.length;
         if (remaining <= 0) {
-            message.warning(`最多可添加 ${MAX_REFERENCE_IMAGES} 张参考图`);
+            message.warning(`最多可添加 ${maxReferenceImages} 张参考图`);
             return;
         }
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/")).slice(0, remaining);
         if (!imageFiles.length) return;
-        if (imageFiles.length < Array.from(files || []).filter((file) => file.type.startsWith("image/")).length) message.warning(`最多可添加 ${MAX_REFERENCE_IMAGES} 张参考图，已忽略超出部分`);
+        if (imageFiles.length < Array.from(files || []).filter((file) => file.type.startsWith("image/")).length) message.warning(`最多可添加 ${maxReferenceImages} 张参考图，已忽略超出部分`);
         setUploadingCount(imageFiles.length);
         const hideLoading = message.loading("正在上传参考图...", 0);
         try {
@@ -335,7 +339,7 @@ export default function ImagePage() {
                     return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, source: "upload" as const, temporary: true };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, MAX_REFERENCE_IMAGES));
+            setReferences((value) => [...value, ...nextReferences].slice(0, maxReferenceImages));
             message.success("参考图上传成功");
         } catch (error) {
             message.error(error instanceof Error ? `上传参考图失败：${error.message}` : "上传参考图失败");
@@ -347,9 +351,9 @@ export default function ImagePage() {
 
     const addReferencesFromClipboard = async () => {
         try {
-            const remaining = MAX_REFERENCE_IMAGES - references.length;
+            const remaining = maxReferenceImages - references.length;
             if (remaining <= 0) {
-                message.warning(`最多可添加 ${MAX_REFERENCE_IMAGES} 张参考图`);
+                message.warning(`最多可添加 ${maxReferenceImages} 张参考图`);
                 return;
             }
             const items = await navigator.clipboard.read();
@@ -367,7 +371,7 @@ export default function ImagePage() {
                         return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, source: "clipboard" as const, temporary: true };
                     }),
                 );
-                setReferences((value) => [...value, ...nextReferences].slice(0, MAX_REFERENCE_IMAGES));
+                setReferences((value) => [...value, ...nextReferences].slice(0, maxReferenceImages));
                 message.success(`已成功上传并读取 ${nextReferences.length} 张参考图`);
             } finally {
                 hideLoading();
@@ -415,7 +419,7 @@ export default function ImagePage() {
 
     const generate = async () => {
         const currentImage = reuseImageAsReference ? latestGeneratedImage(results, logs) : undefined;
-        const snapshot = buildRequestSnapshot({ referenceItems: currentImage && references.length < MAX_REFERENCE_IMAGES && !references.some((item) => sameImageReference(item, currentImage)) ? [...references, imageReferenceFromGenerated(currentImage)] : references });
+        const snapshot = buildRequestSnapshot({ referenceItems: currentImage && references.length < maxReferenceImages && !references.some((item) => sameImageReference(item, currentImage)) ? [...references, imageReferenceFromGenerated(currentImage)] : references });
         if (!snapshot) return;
         await submitGenerationBatch(snapshot);
     };
@@ -578,17 +582,17 @@ export default function ImagePage() {
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         try {
-            if (references.length >= MAX_REFERENCE_IMAGES) {
-                message.warning(`最多可添加 ${MAX_REFERENCE_IMAGES} 张参考图`);
+            if (references.length >= maxReferenceImages) {
+                message.warning(`最多可添加 ${maxReferenceImages} 张参考图`);
                 return;
             }
             if (image.storageKey) {
                 const url = await resolveImageUrl(image.storageKey, image.dataUrl);
-                setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: image.mimeType || "image/png", dataUrl: url || image.dataUrl, storageKey: image.storageKey, source: "result", temporary: false }].slice(0, MAX_REFERENCE_IMAGES));
+                setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: image.mimeType || "image/png", dataUrl: url || image.dataUrl, storageKey: image.storageKey, source: "result", temporary: false }].slice(0, maxReferenceImages));
             } else {
                 const source = await imageToDataUrl(image);
                 const stored = await uploadImage(source || image.dataUrl);
-                setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, source: "result", temporary: false }].slice(0, MAX_REFERENCE_IMAGES));
+                setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, source: "result", temporary: false }].slice(0, maxReferenceImages));
             }
             message.success("已加入参考图");
         } catch (error) {
@@ -662,8 +666,8 @@ export default function ImagePage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
-            if (references.length >= MAX_REFERENCE_IMAGES) {
-                message.warning(`最多可添加 ${MAX_REFERENCE_IMAGES} 张参考图`);
+            if (references.length >= maxReferenceImages) {
+                message.warning(`最多可添加 ${maxReferenceImages} 张参考图`);
                 return;
             }
             const resolvedUrl = await resolveImageUrl(payload.storageKey, payload.dataUrl);
@@ -686,10 +690,10 @@ export default function ImagePage() {
                     message.error("引入素材失败：图片数据为空");
                     return;
                 }
-                setReferences((value) => [...value, reference].slice(0, MAX_REFERENCE_IMAGES));
+                setReferences((value) => [...value, reference].slice(0, maxReferenceImages));
             } else {
                 const stored = await uploadImage(payload.dataUrl);
-                setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, source: payload.source === "library" ? "library" : "upload", temporary: payload.source !== "library" }].slice(0, MAX_REFERENCE_IMAGES));
+                setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, source: payload.source === "library" ? "library" : "upload", temporary: payload.source !== "library" }].slice(0, maxReferenceImages));
             }
         } else {
             message.warning("视频素材不能作为生图参考图");
@@ -944,7 +948,7 @@ export default function ImagePage() {
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
         setPrompt(log.prompt);
-        setReferences((log.references || []).slice(0, MAX_REFERENCE_IMAGES));
+        setReferences((log.references || []).slice(0, maxReferenceImages));
         const nextModel = log.config.imageModel || log.model;
         const nextChannelId = resolveImageChannelId(effectiveConfig, nextModel, imageTaskChannelId(log.task), log.config.imageChannelId, log.config.activeChannelId);
         if (nextModel) updateConfig("imageModel", nextModel);
@@ -986,7 +990,7 @@ export default function ImagePage() {
             text,
             requestConfig,
             displayConfig: buildGenerationLogConfig({ ...requestConfig, count: String(taskCount) }),
-            references: [...referenceItems],
+            references: referenceItems.slice(0, modelCapabilityFor(modelCosts, requestModel).referenceImageCount),
         };
     };
 
@@ -1115,6 +1119,7 @@ export default function ImagePage() {
                     config={imageConfig}
                     model={model}
                     capability={imageCapability}
+                    maxReferenceImages={maxReferenceImages}
                     credits={credits}
                     canGenerate={canGenerate}
                     pendingCount={pendingCount}
@@ -1234,6 +1239,7 @@ function WorkbenchPanel({
     config,
     model,
     capability,
+    maxReferenceImages,
     credits,
     canGenerate,
     pendingCount,
@@ -1257,6 +1263,7 @@ function WorkbenchPanel({
     config: AiConfig;
     model: string;
     capability: ModelCapabilityConfig;
+    maxReferenceImages: number;
     credits: number;
     canGenerate: boolean;
     pendingCount: number;
@@ -1309,14 +1316,14 @@ function WorkbenchPanel({
                 <section className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
                     <div className="flex items-center gap-2 px-3 py-2">
                         <span className="font-medium text-sm">参考图</span>
-                        <Tag className="m-0 text-xs">{references.length}/{MAX_REFERENCE_IMAGES}</Tag>
+                        <Tag className="m-0 text-xs">{references.length}/{maxReferenceImages}</Tag>
                     </div>
                     <div className="border-t border-stone-200 p-3 dark:border-stone-800 space-y-2">
-                        <div className="flex flex-wrap gap-1">
+                        {maxReferenceImages > 0 ? <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences}>剪切板</Button>
                             <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUploadReferences}>上传</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onOpenAssetPicker}>从素材库选择</Button>
-                        </div>
+                        </div> : null}
                         <ReferenceStrip references={references} onRemoveReference={onRemoveReference} uploadingCount={uploadingCount} />
                     </div>
                 </section>
@@ -2695,5 +2702,3 @@ function buildLog({
 function formatLogTime(value: number) {
     return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
-
-

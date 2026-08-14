@@ -29,23 +29,26 @@ type ModelChannel struct {
 
 // ModelCost 模型算力点配置。
 type ModelCost struct {
-	Model              string   `json:"model"`
-	DisplayName        string   `json:"displayName"`
-	Type               string   `json:"type"`
-	Credits            int      `json:"credits"`
-	Ratios             []string `json:"ratios"`
-	Resolutions        []string `json:"resolutions"`
-	Qualities          []string `json:"qualities"`
-	MaxCount           int      `json:"maxCount"`
-	FixedDuration      bool     `json:"fixedDuration"`
-	DurationOptions    []string `json:"durationOptions"`
-	MaxSeconds         int      `json:"maxSeconds"`
-	VideoQualities     []string `json:"videoQualities"`
-	VideoGenerateAudio bool     `json:"videoGenerateAudio"`
-	AudioVoices        []string `json:"audioVoices"`
-	AudioFormats       []string `json:"audioFormats"`
-	AudioSpeeds        []string `json:"audioSpeeds"`
-	CreditType         string   `json:"creditType"`
+	Model               string   `json:"model"`
+	DisplayName         string   `json:"displayName"`
+	Type                string   `json:"type"`
+	Credits             int      `json:"credits"`
+	Ratios              []string `json:"ratios"`
+	Resolutions         []string `json:"resolutions"`
+	Qualities           []string `json:"qualities"`
+	MaxCount            int      `json:"maxCount"`
+	FixedDuration       bool     `json:"fixedDuration"`
+	DurationOptions     []string `json:"durationOptions"`
+	MaxSeconds          int      `json:"maxSeconds"`
+	VideoQualities      []string `json:"videoQualities"`
+	VideoGenerateAudio  bool     `json:"videoGenerateAudio"`
+	AudioVoices         []string `json:"audioVoices"`
+	AudioFormats        []string `json:"audioFormats"`
+	AudioSpeeds         []string `json:"audioSpeeds"`
+	ReferenceImageCount *int     `json:"referenceImageCount,omitempty"`
+	ReferenceVideoCount *int     `json:"referenceVideoCount,omitempty"`
+	ReferenceAudioCount *int     `json:"referenceAudioCount,omitempty"`
+	CreditType          string   `json:"creditType"`
 }
 
 // PublicModelChannelSetting 公开模型渠道配置。

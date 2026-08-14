@@ -105,6 +105,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 <CanvasVideoInputModes
                     node={node}
                     options={videoResourceOptions}
+                    capability={modelCapabilityFor(modelCosts, config.model)}
                     theme={theme}
                     onModeChange={(videoInputMode) => onConfigChange(node.id, { videoInputMode })}
                     onUpload={onVideoReferenceUpload}
@@ -112,7 +113,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     onPreview={onResourcePreview}
                 />
             ) : null}
-            {mode === "image" && imageReferences.length ? <CanvasImageReferenceTiles references={imageReferences} theme={theme} onRemove={onImageReferenceRemove} onPreview={onResourcePreview} /> : null}
+            {mode === "image" && imageReferences.length ? <CanvasImageReferenceTiles references={imageReferences} limit={modelCapabilityFor(modelCosts, config.model).referenceImageCount} theme={theme} onRemove={onImageReferenceRemove} onPreview={onResourcePreview} /> : null}
             {(mode === "image" || mode === "video") && textReferences.length ? <CanvasTextReferenceChips references={textReferences} theme={theme} onRemove={onTextReferenceRemove} /> : null}
             <CanvasPromptChipInput
                 value={prompt}
@@ -187,8 +188,8 @@ function CanvasTextReferenceChips({ references, theme, onRemove }: { references:
     return <div className="mb-2 flex flex-wrap gap-1.5">{references.map((reference) => <span key={reference.connectionId} className="inline-flex h-8 max-w-full items-center gap-1 rounded-full border pl-2 pr-1 text-xs" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }} title={reference.title}><TypeIcon className="size-3 shrink-0" /><span className="max-w-44 truncate">{reference.title}</span>{onRemove ? <button type="button" title="断开文本引用" aria-label={`断开${reference.title}的文本引用`} className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full transition hover:bg-black/10" style={{ color: theme.node.muted }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(reference.connectionId); }}><X className="size-3" /></button> : null}</span>)}</div>;
 }
 
-function CanvasImageReferenceTiles({ references, theme, onRemove, onPreview }: { references: CanvasImageReference[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRemove?: (connectionId: string) => void; onPreview?: CanvasNodePromptPanelProps["onResourcePreview"] }) {
-    return <div className="mb-2 flex min-w-0 flex-wrap gap-1.5">{references.map((reference, index) => <VideoReferenceTile key={reference.connectionId} option={reference} kind="image" theme={theme} disabled={index >= 16} disabledLabel={index >= 16 ? "超过最大参考数量" : undefined} referenceOrder={index + 1} onRemove={() => onRemove?.(reference.connectionId)} onPreview={onPreview} />)}</div>;
+function CanvasImageReferenceTiles({ references, limit, theme, onRemove, onPreview }: { references: CanvasImageReference[]; limit: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRemove?: (connectionId: string) => void; onPreview?: CanvasNodePromptPanelProps["onResourcePreview"] }) {
+    return <div className="mb-2 flex min-w-0 flex-wrap gap-1.5">{references.map((reference, index) => <VideoReferenceTile key={reference.connectionId} option={reference} kind="image" theme={theme} disabled={index >= limit} disabledLabel={index >= limit ? "超过最大参考数量" : undefined} referenceOrder={index + 1} onRemove={() => onRemove?.(reference.connectionId)} onPreview={onPreview} />)}</div>;
 }
 
 const VIDEO_INPUT_MODE_OPTIONS: Array<{ value: CanvasVideoInputMode; label: string }> = [
@@ -199,7 +200,7 @@ const VIDEO_INPUT_MODE_OPTIONS: Array<{ value: CanvasVideoInputMode; label: stri
     { value: "video-continuation", label: "视频续写" },
 ];
 
-function CanvasVideoInputModes({ node, options, theme, onModeChange, onUpload, onRemove, onPreview }: { node: CanvasNodeData; options: CanvasVideoResourceOption[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onModeChange: (mode: CanvasVideoInputMode) => void; onUpload?: CanvasNodePromptPanelProps["onVideoReferenceUpload"]; onRemove?: CanvasNodePromptPanelProps["onVideoReferenceRemove"]; onPreview?: CanvasNodePromptPanelProps["onResourcePreview"] }) {
+function CanvasVideoInputModes({ node, options, capability, theme, onModeChange, onUpload, onRemove, onPreview }: { node: CanvasNodeData; options: CanvasVideoResourceOption[]; capability: ReturnType<typeof modelCapabilityFor>; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onModeChange: (mode: CanvasVideoInputMode) => void; onUpload?: CanvasNodePromptPanelProps["onVideoReferenceUpload"]; onRemove?: CanvasNodePromptPanelProps["onVideoReferenceRemove"]; onPreview?: CanvasNodePromptPanelProps["onResourcePreview"] }) {
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const [uploadTarget, setUploadTarget] = useState<{ kind: CanvasVideoReferenceKind; slot: CanvasVideoReferenceSlot } | null>(null);
     const mode = node.metadata?.videoInputMode || "text-to-video";
@@ -250,10 +251,10 @@ function CanvasVideoInputModes({ node, options, theme, onModeChange, onUpload, o
                 <DisabledVideoResources options={[...images.filter((option) => option.nodeId !== selectedFirstFrame?.nodeId && option.nodeId !== selectedLastFrame?.nodeId), ...videos, ...audios]} theme={theme} orderByNodeId={referenceOrderByNodeId} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} onPreview={onPreview} />
             </> : null}
             {mode === "all-reference" ? <>
-                <VideoReferenceSection label="图片 · 最多 9 张" theme={theme}><VideoReferenceTiles options={images.slice(0, 9)} kind="image" limit={9} theme={theme} orderByNodeId={referenceOrderByNodeId} onAdd={() => selectUpload("image")} onRemove={(id) => onRemove?.(node.id, "reference", id)} onPreview={onPreview} /></VideoReferenceSection>
-                <VideoReferenceSection label="视频 · 最多 3 个" theme={theme}><VideoReferenceTiles options={videos.slice(0, 3)} kind="video" limit={3} theme={theme} orderByNodeId={referenceOrderByNodeId} onAdd={() => selectUpload("video")} onRemove={(id) => onRemove?.(node.id, "reference", id)} onPreview={onPreview} /></VideoReferenceSection>
-                <VideoReferenceSection label="音频 · 最多 3 个" theme={theme}><VideoReferenceTiles options={audios.slice(0, 3)} kind="audio" limit={3} theme={theme} orderByNodeId={referenceOrderByNodeId} onAdd={() => selectUpload("audio")} onRemove={(id) => onRemove?.(node.id, "reference", id)} onPreview={onPreview} /></VideoReferenceSection>
-                <DisabledVideoResources options={[...images.slice(9), ...videos.slice(3), ...audios.slice(3)]} theme={theme} orderByNodeId={referenceOrderByNodeId} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} onPreview={onPreview} />
+                <VideoReferenceSection label={`图片 · 最多 ${capability.referenceImageCount} 张`} theme={theme}><VideoReferenceTiles options={images.slice(0, capability.referenceImageCount)} kind="image" limit={capability.referenceImageCount} theme={theme} orderByNodeId={referenceOrderByNodeId} onAdd={() => selectUpload("image")} onRemove={(id) => onRemove?.(node.id, "reference", id)} onPreview={onPreview} /></VideoReferenceSection>
+                <VideoReferenceSection label={`视频 · 最多 ${capability.referenceVideoCount} 个`} theme={theme}><VideoReferenceTiles options={videos.slice(0, capability.referenceVideoCount)} kind="video" limit={capability.referenceVideoCount} theme={theme} orderByNodeId={referenceOrderByNodeId} onAdd={() => selectUpload("video")} onRemove={(id) => onRemove?.(node.id, "reference", id)} onPreview={onPreview} /></VideoReferenceSection>
+                <VideoReferenceSection label={`音频 · 最多 ${capability.referenceAudioCount} 个`} theme={theme}><VideoReferenceTiles options={audios.slice(0, capability.referenceAudioCount)} kind="audio" limit={capability.referenceAudioCount} theme={theme} orderByNodeId={referenceOrderByNodeId} onAdd={() => selectUpload("audio")} onRemove={(id) => onRemove?.(node.id, "reference", id)} onPreview={onPreview} /></VideoReferenceSection>
+                <DisabledVideoResources options={[...images.slice(capability.referenceImageCount), ...videos.slice(capability.referenceVideoCount), ...audios.slice(capability.referenceAudioCount)]} theme={theme} orderByNodeId={referenceOrderByNodeId} onRemove={(resourceNodeId) => onRemove?.(node.id, "reference", resourceNodeId)} onPreview={onPreview} />
             </> : null}
             {mode === "video-continuation" ? <>
                 <VideoReferenceSection label="续写视频" theme={theme}><VideoReferenceTile option={continuationReference} kind="video" theme={theme} referenceOrder={continuationReference ? referenceOrderByNodeId.get(continuationReference.nodeId) : undefined} onAdd={() => selectUpload("video")} onRemove={() => continuationReference && onRemove?.(node.id, "reference", continuationReference.nodeId)} onPreview={onPreview} /></VideoReferenceSection>

@@ -342,7 +342,7 @@ export default function VideoPage() {
 
     const addReferences = async (files?: FileList | null, target: ReferenceUploadTarget = "all") => {
         const selectedFiles = Array.from(files || []);
-        const limits = videoInputModeLimits(videoInputMode);
+        const limits = videoInputModeLimits(videoInputMode, videoCapability);
         const allowImage = target === "all" || target === "image";
         const allowVideo = target === "all" || target === "video";
         const allowAudio = target === "all" || target === "audio";
@@ -451,7 +451,7 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
-            const limit = videoInputModeLimits(videoInputMode).images;
+            const limit = videoInputModeLimits(videoInputMode, videoCapability).images;
             const nextReferences = await Promise.all(
                 blobs.slice(0, Math.max(0, limit - references.length)).map(async (blob, index) => {
                     const image = await uploadImage(blob);
@@ -500,7 +500,7 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的视频");
                 return;
             }
-            const limit = videoInputModeLimits(videoInputMode).videos;
+            const limit = videoInputModeLimits(videoInputMode, videoCapability).videos;
             const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, Math.max(0, limit - videoReferences.length));
             if (blobs.some((blob) => blob.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
             const nextVideoReferences = await Promise.all(
@@ -524,7 +524,7 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的音频");
                 return;
             }
-            const limit = videoInputModeLimits(videoInputMode).audios;
+            const limit = videoInputModeLimits(videoInputMode, videoCapability).audios;
             const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, Math.max(0, limit - audioReferences.length));
             if (blobs.some((blob) => blob.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
             const nextAudioReferences = filterAudioReferencesByDuration(
@@ -601,7 +601,7 @@ export default function VideoPage() {
         const klingV26 = isAPIMartKlingV26Config(normalizedConfig, modelValue);
         const klingV3 = isKlingV3Config(normalizedConfig, modelValue);
         const kling = klingV26 || klingV3;
-        const input = videoInputModeReferences(inputMode, referenceItems, firstFrameItem, lastFrameItem, videoReferenceItems, audioReferenceItems);
+        const input = videoInputModeReferences(inputMode, referenceItems, firstFrameItem, lastFrameItem, videoReferenceItems, audioReferenceItems, modelCapabilityFor(modelCosts, modelValue));
         if (!text) {
             message.error("请输入视频提示词");
             return null;
@@ -788,13 +788,17 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
-        const limits = videoInputModeLimits(videoInputMode);
+        const limits = videoInputModeLimits(videoInputMode, videoCapability);
         const insertImage = async () => {
             if (payload.kind !== "image") {
                 message.warning("请选择图片素材");
                 return;
             }
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey }].slice(0, Math.max(references.length, limits.images)));
+            if (references.length >= limits.images) {
+                message.warning(`当前模式最多参考 ${limits.images} 张图片`);
+                return;
+            }
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey }].slice(0, limits.images));
         };
         const insertFrame = (slot: "first" | "last") => {
             if (payload.kind !== "image") {
@@ -809,7 +813,11 @@ export default function VideoPage() {
                 message.warning("请选择视频素材");
                 return;
             }
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, Math.max(videoReferences.length, limits.videos)));
+            if (videoReferences.length >= limits.videos) {
+                message.warning(`当前模式最多参考 ${limits.videos} 个视频`);
+                return;
+            }
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, limits.videos));
         };
         const insertAudio = () => {
             if (payload.kind !== "audio") {
@@ -817,7 +825,11 @@ export default function VideoPage() {
                 return;
             }
             const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, durationMs: payload.durationMs }], message.warning);
-            setAudioReferences((value) => [...value, ...next].slice(0, Math.max(audioReferences.length, limits.audios)));
+            if (audioReferences.length >= limits.audios) {
+                message.warning(`当前模式最多参考 ${limits.audios} 个音频`);
+                return;
+            }
+            setAudioReferences((value) => [...value, ...next].slice(0, limits.audios));
         };
 
         if (assetPickerTarget === "element") {
@@ -1241,7 +1253,8 @@ function WorkbenchPanel({
     onMoveAudioReference: (index: number, offset: number) => void;
     onGenerate: () => void;
 }) {
-    const activeInput = videoInputModeReferences(videoInputMode, references, firstFrame, lastFrame, videoReferences, audioReferences);
+    const activeInput = videoInputModeReferences(videoInputMode, references, firstFrame, lastFrame, videoReferences, audioReferences, capability);
+    const referenceLimits = videoInputModeLimits(videoInputMode, capability);
     const activeIds = new Set([
         ...activeInput.references.map((reference) => reference.id),
         ...(activeInput.firstFrame ? [activeInput.firstFrame.id] : []),
@@ -1297,33 +1310,33 @@ function WorkbenchPanel({
                     </>
                 ) : null}
                 {videoInputMode === "all-reference" ? <>
-                <WorkbenchSection title="参考图" count={Math.min(references.length, 9)}>
+                <WorkbenchSection title="参考图" count={Math.min(references.length, referenceLimits.images)}>
                     <div className="space-y-2">
-                        <ReferenceImageControls onPaste={onPasteReferences} onUpload={() => onUploadReferences("image")} onOpenAssetPicker={() => onOpenAssetPicker("image")} />
-                        <ReferenceImageStrip references={references.slice(0, 9)} limit={9} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
+                        {referenceLimits.images > 0 ? <ReferenceImageControls onPaste={onPasteReferences} onUpload={() => onUploadReferences("image")} onOpenAssetPicker={() => onOpenAssetPicker("image")} /> : null}
+                        <ReferenceImageStrip references={references.slice(0, referenceLimits.images)} limit={referenceLimits.images} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
                     </div>
                 </WorkbenchSection>
-                <WorkbenchSection title="参考视频" count={Math.min(videoReferences.length, 3)}>
+                <WorkbenchSection title="参考视频" count={Math.min(videoReferences.length, referenceLimits.videos)}>
                     <div className="space-y-2">
-                        <div className="flex flex-wrap gap-1">
+                        {referenceLimits.videos > 0 ? <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteVideoReferences}>剪贴板</Button>
                             <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => onUploadReferences("video")}>上传</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker("video")}>从素材库选择</Button>
-                        </div>
-                        <ReferenceVideoStrip references={videoReferences.slice(0, 3)} limit={3} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
+                        </div> : null}
+                        <ReferenceVideoStrip references={videoReferences.slice(0, referenceLimits.videos)} limit={referenceLimits.videos} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
                     </div>
                 </WorkbenchSection>
-                <WorkbenchSection title="参考音频" count={Math.min(audioReferences.length, 3)}>
+                <WorkbenchSection title="参考音频" count={Math.min(audioReferences.length, referenceLimits.audios)}>
                     <div className="space-y-2">
-                        <div className="flex flex-wrap gap-1">
+                        {referenceLimits.audios > 0 ? <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteAudioReferences}>剪贴板</Button>
                             <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => onUploadReferences("audio")}>上传</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker("audio")}>从素材库选择</Button>
-                        </div>
-                        <ReferenceAudioStrip references={audioReferences.slice(0, 3)} limit={3} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
+                        </div> : null}
+                        <ReferenceAudioStrip references={audioReferences.slice(0, referenceLimits.audios)} limit={referenceLimits.audios} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
                     </div>
                 </WorkbenchSection>
-                <DisabledVideoResources references={references.slice(9)} videoReferences={videoReferences.slice(3)} audioReferences={audioReferences.slice(3)} firstFrame={firstFrame} lastFrame={lastFrame} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} onRemoveFrame={onRemoveFrame} />
+                <DisabledVideoResources references={references.slice(referenceLimits.images)} videoReferences={videoReferences.slice(referenceLimits.videos)} audioReferences={audioReferences.slice(referenceLimits.audios)} firstFrame={firstFrame} lastFrame={lastFrame} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} onRemoveFrame={onRemoveFrame} />
                 </> : null}
                 {videoInputMode === "video-continuation" ? (
                     <WorkbenchSection title="续写视频" count={Math.min(videoReferences.length, 1)}>
@@ -2787,10 +2800,10 @@ function videoWorkbenchDefaults(modelCosts: Parameters<typeof modelCapabilityFor
     };
 }
 
-function videoInputModeLimits(mode: CanvasVideoInputMode) {
+function videoInputModeLimits(mode: CanvasVideoInputMode, capability?: ModelCapabilityConfig) {
     if (mode === "image-to-video") return { images: 1, videos: 0, audios: 0 };
     if (mode === "first-last-frame") return { images: 0, videos: 0, audios: 0 };
-    if (mode === "all-reference") return { images: 9, videos: 3, audios: 3 };
+    if (mode === "all-reference") return { images: capability?.referenceImageCount ?? 9, videos: capability?.referenceVideoCount ?? 3, audios: capability?.referenceAudioCount ?? 3 };
     if (mode === "video-continuation") return { images: 0, videos: 1, audios: 0 };
     return { images: 0, videos: 0, audios: 0 };
 }
@@ -2800,10 +2813,13 @@ function normalizeVideoCapabilityQuality(value: string) {
     return ["480", "720", "768", "1080", "1440"].includes(normalized) ? `${normalized}p` : normalized;
 }
 
-function videoInputModeReferences(mode: CanvasVideoInputMode, references: ReferenceImage[], firstFrame: ReferenceImage | null, lastFrame: ReferenceImage | null, videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
+function videoInputModeReferences(mode: CanvasVideoInputMode, references: ReferenceImage[], firstFrame: ReferenceImage | null, lastFrame: ReferenceImage | null, videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], capability?: ModelCapabilityConfig) {
     if (mode === "image-to-video") return { references: references.slice(0, 1), firstFrame: null, lastFrame: null, videoReferences: [], audioReferences: [] };
     if (mode === "first-last-frame") return { references: [], firstFrame, lastFrame, videoReferences: [], audioReferences: [] };
-    if (mode === "all-reference") return { references: references.slice(0, 9), firstFrame: null, lastFrame: null, videoReferences: videoReferences.slice(0, 3), audioReferences: audioReferences.slice(0, 3) };
+    if (mode === "all-reference") {
+        const limits = videoInputModeLimits(mode, capability);
+        return { references: references.slice(0, limits.images), firstFrame: null, lastFrame: null, videoReferences: videoReferences.slice(0, limits.videos), audioReferences: audioReferences.slice(0, limits.audios) };
+    }
     if (mode === "video-continuation") return { references: [], firstFrame: null, lastFrame: null, videoReferences: videoReferences.slice(0, 1), audioReferences: [] };
     return { references: [], firstFrame: null, lastFrame: null, videoReferences: [], audioReferences: [] };
 }

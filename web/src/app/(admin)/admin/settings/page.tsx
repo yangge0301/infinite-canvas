@@ -518,7 +518,7 @@ export default function AdminSettingsPage() {
                                             rowKey="model"
                                             pagination={false}
                                             size="small"
-                                            scroll={{ x: 2780 }}
+                                            scroll={{ x: 3180 }}
                                             dataSource={publicModels.map((model) => modelCosts.find((item) => item.model === model) || defaultModelCapability(model))}
                                             columns={[
                                                 { title: "模型", dataIndex: "model", width: 180, fixed: "left" },
@@ -605,6 +605,24 @@ export default function AdminSettingsPage() {
                                                     dataIndex: "audioSpeeds",
                                                     width: 220,
                                                     render: (_, item: AdminModelCost) => item.type === "audio" ? <Select className="!w-full" mode="multiple" maxTagCount="responsive" value={item.audioSpeeds} options={audioSpeedOptions.map((value) => ({ value, label: `${value}x` }))} onChange={(audioSpeeds) => patchModelCost(form, setModelCosts, item, { audioSpeeds })} /> : "",
+                                                },
+                                                {
+                                                    title: "参考图片个数",
+                                                    dataIndex: "referenceImageCount",
+                                                    width: 130,
+                                                    render: (_, item: AdminModelCost) => item.type === "image" || item.type === "video" ? <InputNumber min={0} precision={0} value={item.referenceImageCount} className="!w-full" onChange={(referenceImageCount) => patchModelCost(form, setModelCosts, item, { referenceImageCount: Math.max(0, Math.floor(Number(referenceImageCount) || 0)) })} /> : "",
+                                                },
+                                                {
+                                                    title: "参考视频个数",
+                                                    dataIndex: "referenceVideoCount",
+                                                    width: 130,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" ? <InputNumber min={0} precision={0} value={item.referenceVideoCount} className="!w-full" onChange={(referenceVideoCount) => patchModelCost(form, setModelCosts, item, { referenceVideoCount: Math.max(0, Math.floor(Number(referenceVideoCount) || 0)) })} /> : "",
+                                                },
+                                                {
+                                                    title: "参考音频个数",
+                                                    dataIndex: "referenceAudioCount",
+                                                    width: 130,
+                                                    render: (_, item: AdminModelCost) => item.type === "video" ? <InputNumber min={0} precision={0} value={item.referenceAudioCount} className="!w-full" onChange={(referenceAudioCount) => patchModelCost(form, setModelCosts, item, { referenceAudioCount: Math.max(0, Math.floor(Number(referenceAudioCount) || 0)) })} /> : "",
                                                 },
                                                 {
                                                     title: "积分",
@@ -1243,7 +1261,23 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
 }
 
 function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChannel"]["modelCosts"][number]>[]) {
-    return items.filter((item) => item.model).map((item) => ({ ...defaultModelCapability(item.model || "", item.type), ...item, model: item.model || "", displayName: item.displayName || item.model || "", credits: Math.max(0, Number(item.credits) || 0), maxCount: Math.min(4, Math.max(0, Number(item.maxCount) || 0)), maxSeconds: Math.min(30, Math.max(0, Number(item.maxSeconds) || 0)) }));
+    return items.filter((item) => item.model).map((item) => {
+        const defaults = defaultModelCapability(item.model || "", item.type);
+        const type = item.type || defaults.type;
+        return {
+            ...defaults,
+            ...item,
+            model: item.model || "",
+            type,
+            displayName: item.displayName || item.model || "",
+            credits: Math.max(0, Number(item.credits) || 0),
+            maxCount: Math.min(4, Math.max(0, Number(item.maxCount) || 0)),
+            maxSeconds: Math.min(30, Math.max(0, Number(item.maxSeconds) || 0)),
+            referenceImageCount: type === "image" || type === "video" ? Math.max(0, Math.floor(Number(item.referenceImageCount ?? defaults.referenceImageCount) || 0)) : 0,
+            referenceVideoCount: type === "video" ? Math.max(0, Math.floor(Number(item.referenceVideoCount ?? defaults.referenceVideoCount) || 0)) : 0,
+            referenceAudioCount: type === "video" ? Math.max(0, Math.floor(Number(item.referenceAudioCount ?? defaults.referenceAudioCount) || 0)) : 0,
+        };
+    });
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {

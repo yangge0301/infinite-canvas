@@ -17,6 +17,9 @@ export type ModelCapabilityConfig = {
     audioVoices: string[];
     audioFormats: string[];
     audioSpeeds: string[];
+    referenceImageCount: number;
+    referenceVideoCount: number;
+    referenceAudioCount: number;
     creditType: "request" | "second";
 };
 
@@ -61,6 +64,9 @@ export function defaultModelCapability(model: string, type = inferModelType(mode
         audioVoices: type === "audio" ? [...audioVoiceOptions] : [],
         audioFormats: type === "audio" ? [...audioFormatOptions] : [],
         audioSpeeds: type === "audio" ? [...audioSpeedOptions] : [],
+        referenceImageCount: type === "image" ? 16 : type === "video" ? 9 : 0,
+        referenceVideoCount: type === "video" ? 3 : 0,
+        referenceAudioCount: type === "video" ? 3 : 0,
         creditType: "request",
     };
 }
@@ -84,7 +90,15 @@ export function configuredModelCapability(configs: ModelCapabilityConfig[] | und
         audioVoices: capabilityList(configured.audioVoices, defaults.audioVoices),
         audioFormats: capabilityList(configured.audioFormats, defaults.audioFormats),
         audioSpeeds: capabilityList(configured.audioSpeeds, defaults.audioSpeeds),
+        referenceImageCount: normalizeReferenceCount(configured.referenceImageCount, defaults.referenceImageCount),
+        referenceVideoCount: normalizeReferenceCount(configured.referenceVideoCount, defaults.referenceVideoCount),
+        referenceAudioCount: normalizeReferenceCount(configured.referenceAudioCount, defaults.referenceAudioCount),
     };
+}
+
+function normalizeReferenceCount(value: unknown, fallback: number) {
+    const count = Number(value);
+    return Number.isFinite(count) && count >= 0 ? Math.floor(count) : fallback;
 }
 
 function capabilityList(value: unknown, fallback: string[]) {

@@ -517,6 +517,9 @@ func normalizeModelCost(item model.ModelCost) model.ModelCost {
 		item.MaxCount = 0
 	}
 	if item.Type == "image" {
+		item.ReferenceImageCount = normalizeReferenceCount(item.ReferenceImageCount, 16)
+		item.ReferenceVideoCount = nil
+		item.ReferenceAudioCount = nil
 		item.Ratios = normalizeModelOptions(item.Ratios, imageModelRatios)
 		item.Resolutions = normalizeModelOptions(item.Resolutions, imageModelResolutions)
 		item.Qualities = normalizeModelOptions(item.Qualities, imageModelQualities)
@@ -527,6 +530,9 @@ func normalizeModelCost(item model.ModelCost) model.ModelCost {
 		item.AudioFormats = nil
 		item.AudioSpeeds = nil
 	} else if item.Type == "video" {
+		item.ReferenceImageCount = normalizeReferenceCount(item.ReferenceImageCount, 9)
+		item.ReferenceVideoCount = normalizeReferenceCount(item.ReferenceVideoCount, 3)
+		item.ReferenceAudioCount = normalizeReferenceCount(item.ReferenceAudioCount, 3)
 		item.Ratios = normalizeModelOptions(item.Ratios, videoModelRatios)
 		if item.VideoQualities == nil {
 			item.VideoQualities = append([]string{}, defaultVideoQualities...)
@@ -546,6 +552,9 @@ func normalizeModelCost(item model.ModelCost) model.ModelCost {
 		item.AudioFormats = nil
 		item.AudioSpeeds = nil
 	} else if item.Type == "audio" {
+		item.ReferenceImageCount = nil
+		item.ReferenceVideoCount = nil
+		item.ReferenceAudioCount = nil
 		item.AudioVoices = normalizeModelOptions(item.AudioVoices, audioModelVoices)
 		item.AudioFormats = normalizeModelOptions(item.AudioFormats, audioModelFormats)
 		item.AudioSpeeds = normalizeModelOptions(item.AudioSpeeds, audioModelSpeeds)
@@ -556,6 +565,9 @@ func normalizeModelCost(item model.ModelCost) model.ModelCost {
 		item.DurationOptions = nil
 		item.MaxSeconds = 0
 	} else {
+		item.ReferenceImageCount = nil
+		item.ReferenceVideoCount = nil
+		item.ReferenceAudioCount = nil
 		item.Ratios = nil
 		item.Resolutions = nil
 		item.Qualities = nil
@@ -574,6 +586,20 @@ func normalizeModelCost(item model.ModelCost) model.ModelCost {
 		item.CreditType = "request"
 	}
 	return item
+}
+
+func normalizeReferenceCount(value *int, fallback int) *int {
+	if value == nil {
+		return referenceCount(fallback)
+	}
+	if *value < 0 {
+		return referenceCount(0)
+	}
+	return value
+}
+
+func referenceCount(value int) *int {
+	return &value
 }
 
 func normalizeModelOptions(values []string, allowed []string) []string {
@@ -603,7 +629,16 @@ func syncModelCosts(costs []model.ModelCost, models []string) []model.ModelCost 
 	}
 	for _, modelName := range models {
 		if _, ok := byModel[modelName]; !ok {
-			byModel[modelName] = normalizeModelCost(model.ModelCost{Model: modelName})
+			item := model.ModelCost{Model: modelName}
+			switch modelType(modelName) {
+			case "image":
+				item.ReferenceImageCount = referenceCount(16)
+			case "video":
+				item.ReferenceImageCount = referenceCount(9)
+				item.ReferenceVideoCount = referenceCount(3)
+				item.ReferenceAudioCount = referenceCount(3)
+			}
+			byModel[modelName] = normalizeModelCost(item)
 		}
 	}
 	result := make([]model.ModelCost, 0, len(byModel))
