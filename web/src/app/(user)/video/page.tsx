@@ -1,22 +1,24 @@
 "use client";
 import axios from "axios";
 
-import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, CloudUpload, Copy, Download, FolderPlus, History, LoaderCircle, Music2, PanelBottom, PanelLeft, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, CloudUpload, Copy, Download, FolderPlus, History, LoaderCircle, Music2, Plus, RotateCcw, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { App, Button, Checkbox, Empty, Input, Modal, Switch, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
-import { KlingV26WorkbenchPanel } from "@/app/(user)/video/components/kling-v26-workbench-panel";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
-import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue } from "@/components/video-settings-panel";
+import { CanvasNodeVideoSettingsPanel } from "@/app/(user)/canvas/components/canvas-node-video-settings-panel";
+import { normalizeVideoResolutionValue, normalizeVideoSizeValue } from "@/components/video-settings-panel";
+import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { firstAllowed, modelCapabilityFor, videoSizeForCapability, type ModelCapabilityConfig } from "@/lib/model-capabilities";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { modelKey, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { deleteStoredMedia, downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { deleteVideoGenerationLogs, fetchVideoGenerationLogs, saveVideoGenerationLogs } from "@/services/api/generation-logs";
@@ -27,6 +29,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import type { CanvasVideoInputMode } from "@/app/(user)/canvas/types";
 
 type GeneratedVideo = {
     id: string;
@@ -53,6 +56,8 @@ type GenerationResult = {
     lastFrame?: ReferenceImage | null;
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    videoInputMode: CanvasVideoInputMode;
+    videoBitrate: "standard" | "high";
     taskCount?: number;
     durationMs?: number;
     progress?: number;
@@ -76,6 +81,8 @@ type GenerationLog = {
     lastFrame?: ReferenceImage | null;
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    videoInputMode: CanvasVideoInputMode;
+    videoBitrate: "standard" | "high";
     taskCount?: number;
     durationMs: number;
     size: string;
@@ -92,28 +99,22 @@ type GenerationLog = {
 type GenerationLogConfig = Pick<AiConfig, "channelMode" | "activeChannelId" | "videoChannelId" | "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoMode" | "videoNegativePrompt" | "videoMultiShot" | "videoShotType" | "videoMultiPrompt" | "videoElementList" | "videoGenerateAudio" | "videoWatermark" | "videoCharacterOrientation">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
-type WorkbenchLayout = "side" | "bottom";
 type AssetPickerTarget = "general" | "image" | "video" | "audio" | "firstFrame" | "lastFrame" | "element";
+type ReferenceUploadTarget = "all" | "image" | "video" | "audio";
 
-const WORKBENCH_LAYOUT_KEY = "infinite-canvas:video-workbench-layout";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
-const quickResolutionOptions = [
-    { value: "480", label: "480p" },
-    { value: "720", label: "720p" },
-    { value: "1080", label: "1080p" },
-];
-const quickSizeOptions = [
-    { value: "1280x720", label: "1280x720" },
-    { value: "720x1280", label: "720x1280" },
-    { value: "1024x1024", label: "1024x1024" },
-    { value: "1792x1024", label: "1792x1024" },
-    { value: "1024x1792", label: "1024x1792" },
-    { value: "auto", label: "auto" },
+const VIDEO_INPUT_MODE_OPTIONS: Array<{ value: CanvasVideoInputMode; label: string }> = [
+    { value: "text-to-video", label: "文生视频" },
+    { value: "image-to-video", label: "图生视频" },
+    { value: "first-last-frame", label: "首尾帧" },
+    { value: "all-reference", label: "全能参考" },
+    { value: "video-continuation", label: "视频续写" },
 ];
 
 export default function VideoPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const referenceUploadTargetRef = useRef<ReferenceUploadTarget>("all");
     const elementFileInputRef = useRef<HTMLInputElement>(null);
     const firstFrameInputRef = useRef<HTMLInputElement>(null);
     const lastFrameInputRef = useRef<HTMLInputElement>(null);
@@ -142,8 +143,9 @@ export default function VideoPage() {
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
-    const [workbenchLayout, setWorkbenchLayoutState] = useState<WorkbenchLayout>("bottom");
-    const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
+    const [videoInputMode, setVideoInputMode] = useState<CanvasVideoInputMode>("text-to-video");
+    const [videoBitrate, setVideoBitrate] = useState<"standard" | "high">("high");
+    const [referenceUploadTarget, setReferenceUploadTarget] = useState<ReferenceUploadTarget>("all");
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTarget, setAssetPickerTarget] = useState<AssetPickerTarget>("general");
@@ -159,13 +161,13 @@ export default function VideoPage() {
     const logsRef = useRef<GenerationLog[]>([]);
     const effectiveConfigRef = useRef(videoConfig);
 
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const videoCapability = modelCapabilityFor(modelCosts, model);
+    const normalizedVideoConfig = normalizeVideoWorkbenchConfig(videoConfig, modelCosts, model);
+    const credits = requestCreditCost({ channelMode: normalizedVideoConfig.channelMode, modelCosts, model, count: 1, seconds: normalizedVideoConfig.videoSeconds }) * taskCount;
     const canGenerate = Boolean(prompt.trim());
     const pendingCount = results.filter((item) => item.status === "pending").length;
-    const klingWorkbench = resolveKlingWorkbenchConfig(videoConfig, model);
-    const klingWorkbenchVariant = klingWorkbench?.variant || "";
-    const klingWorkbenchProvider = klingWorkbench?.provider || "apimart";
-    const isKlingWorkbench = Boolean(klingWorkbench);
     const pendingLogCount = logs.filter((log) => log.status === "生成中" && log.task && !log.video).length;
     const usesBackendVideoTasks = (value: AiConfig) => value.channelMode === "remote" || (value.channelMode === "local" && Boolean(token));
 
@@ -204,12 +206,6 @@ export default function VideoPage() {
 
     useEffect(() => {
         void refreshLogs().then((items) => syncBackendVideoTasks(items));
-        try {
-            const storedLayout = window.localStorage?.getItem(WORKBENCH_LAYOUT_KEY);
-            if (storedLayout === "side" || storedLayout === "bottom") setWorkbenchLayoutState(storedLayout);
-        } catch {
-            // Keep the default layout when localStorage is unavailable.
-        }
     }, []);
 
     useEffect(() => {
@@ -228,15 +224,6 @@ export default function VideoPage() {
         if (!isUserReady || !token) return;
         void loadAccountVideoHistory(token).then((items) => syncBackendVideoTasks(items || logsRef.current));
     }, [isUserReady, token]);
-
-    const setWorkbenchLayout = (layout: WorkbenchLayout) => {
-        setWorkbenchLayoutState(layout);
-        try {
-            window.localStorage?.setItem(WORKBENCH_LAYOUT_KEY, layout);
-        } catch {
-            // Keep the in-memory layout when localStorage is unavailable.
-        }
-    };
 
     const pastePromptFromClipboard = async () => {
         try {
@@ -327,14 +314,31 @@ export default function VideoPage() {
         updateElementReferences(elementIndex, (value) => moveListItem(value, index, offset));
     };
 
-    const addReferences = async (files?: FileList | null) => {
+    const openReferenceUpload = (target: ReferenceUploadTarget) => {
+        const input = fileInputRef.current;
+        if (!input) return;
+        referenceUploadTargetRef.current = target;
+        setReferenceUploadTarget(target);
+        input.accept = referenceUploadAccept(target);
+        input.click();
+    };
+
+    const addReferences = async (files?: FileList | null, target: ReferenceUploadTarget = "all") => {
         const selectedFiles = Array.from(files || []);
-        const referenceImageLimit = isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images;
-        const unsupported = isKlingWorkbench ? selectedFiles.filter((file) => !file.type.startsWith("image/")) : selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
-        if (unsupported.length) message.warning(isKlingWorkbench ? "当前 Kling 仅支持参考图" : "已忽略不支持的参考素材，请使用图片、mp4/mov 视频或 mp3/wav 音频");
-        const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, Math.max(0, referenceImageLimit - references.length));
-        const videoFiles = isKlingWorkbench ? [] : selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
-        const audioFiles = isKlingWorkbench ? [] : selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
+        const limits = videoInputModeLimits(videoInputMode);
+        const allowImage = target === "all" || target === "image";
+        const allowVideo = target === "all" || target === "video";
+        const allowAudio = target === "all" || target === "audio";
+        const unsupported = selectedFiles.filter((file) =>
+            (file.type.startsWith("image/") && !allowImage) ||
+            (file.type.startsWith("video/") && !allowVideo) ||
+            (isSupportedAudioFile(file) && !allowAudio) ||
+            (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file)),
+        );
+        if (unsupported.length) message.warning("已忽略当前参考类型不支持的素材");
+        const imageFiles = allowImage ? selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, Math.max(0, limits.images - references.length)) : [];
+        const videoFiles = allowVideo ? selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, Math.max(0, limits.videos - videoReferences.length)) : [];
+        const audioFiles = allowAudio ? selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, Math.max(0, limits.audios - audioReferences.length)) : [];
         if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) message.warning("已忽略超过 30MB 的参考图");
         if (selectedFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
         if (selectedFiles.some((file) => isSupportedAudioFile(file) && file.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
@@ -362,9 +366,9 @@ export default function VideoPage() {
                 ),
                 message.warning,
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, referenceImageLimit));
-            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
-            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
+            setReferences((value) => [...value, ...nextReferences].slice(0, Math.max(references.length, limits.images)));
+            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, Math.max(videoReferences.length, limits.videos)));
+            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, Math.max(audioReferences.length, limits.audios)));
             if (nextReferences.length) message.success(`已上传 ${nextReferences.length} 张参考图`);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "参考素材上传失败");
@@ -430,13 +434,14 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
+            const limit = videoInputModeLimits(videoInputMode).images;
             const nextReferences = await Promise.all(
-                blobs.slice(0, Math.max(0, (isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images) - references.length)).map(async (blob, index) => {
+                blobs.slice(0, Math.max(0, limit - references.length)).map(async (blob, index) => {
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images));
+            setReferences((value) => [...value, ...nextReferences].slice(0, Math.max(references.length, limit)));
             message.success(`已读取 ${nextReferences.length} 张参考图`);
         } catch {
             message.error("剪切板里没有可读取的图片");
@@ -478,7 +483,8 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的视频");
                 return;
             }
-            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
+            const limit = videoInputModeLimits(videoInputMode).videos;
+            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, Math.max(0, limit - videoReferences.length));
             if (blobs.some((blob) => blob.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning("已忽略超过 50MB 的参考视频");
             const nextVideoReferences = await Promise.all(
                 usable.map(async (blob, index) => {
@@ -486,7 +492,7 @@ export default function VideoPage() {
                     return { id: nanoid(), name: `clipboard-video-${index + 1}.mp4`, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs };
                 }),
             );
-            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, Math.max(videoReferences.length, limit)));
             message.success(`已读取 ${nextVideoReferences.length} 个参考视频`);
         } catch {
             message.error("剪切板里没有可读取的视频");
@@ -501,7 +507,8 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的音频");
                 return;
             }
-            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
+            const limit = videoInputModeLimits(videoInputMode).audios;
+            const usable = blobs.filter((blob) => blob.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, Math.max(0, limit - audioReferences.length));
             if (blobs.some((blob) => blob.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning("已忽略超过 15MB 的参考音频");
             const nextAudioReferences = filterAudioReferencesByDuration(
                 audioReferences,
@@ -513,7 +520,7 @@ export default function VideoPage() {
                 ),
                 message.warning,
             );
-            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
+            setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, Math.max(audioReferences.length, limit)));
             message.success(`已读取 ${nextAudioReferences.length} 个参考音频`);
         } catch {
             message.error("剪切板里没有可读取的音频");
@@ -571,61 +578,66 @@ export default function VideoPage() {
         await submitGenerationSnapshot(snapshot);
     };
 
-    const buildRequestSnapshot = ({ promptText = prompt, negativePromptText, referenceItems = references, firstFrameItem = firstFrame, lastFrameItem = lastFrame, videoReferenceItems = videoReferences, audioReferenceItems = audioReferences, taskCountValue = taskCount, configValue = videoConfig, modelValue = model }: { promptText?: string; negativePromptText?: string; referenceItems?: ReferenceImage[]; firstFrameItem?: ReferenceImage | null; lastFrameItem?: ReferenceImage | null; videoReferenceItems?: ReferenceVideo[]; audioReferenceItems?: ReferenceAudio[]; taskCountValue?: number; configValue?: AiConfig; modelValue?: string } = {}) => {
+    const buildRequestSnapshot = ({ promptText = prompt, negativePromptText, referenceItems = references, firstFrameItem = firstFrame, lastFrameItem = lastFrame, videoReferenceItems = videoReferences, audioReferenceItems = audioReferences, taskCountValue = taskCount, configValue = normalizedVideoConfig, modelValue = model, inputMode = videoInputMode, bitrateValue = videoBitrate }: { promptText?: string; negativePromptText?: string; referenceItems?: ReferenceImage[]; firstFrameItem?: ReferenceImage | null; lastFrameItem?: ReferenceImage | null; videoReferenceItems?: ReferenceVideo[]; audioReferenceItems?: ReferenceAudio[]; taskCountValue?: number; configValue?: AiConfig; modelValue?: string; inputMode?: CanvasVideoInputMode; bitrateValue?: "standard" | "high" } = {}) => {
         const text = promptText.trim();
-        const currentNegativePrompt = (negativePromptText ?? configValue.videoNegativePrompt ?? negativePrompt).trim();
-        const klingV26 = isAPIMartKlingV26Config(configValue, modelValue);
-        const klingV3 = isKlingV3Config(configValue, modelValue);
+        const normalizedConfig = normalizeVideoWorkbenchConfig(configValue, modelCosts, modelValue);
+        const currentNegativePrompt = (negativePromptText ?? normalizedConfig.videoNegativePrompt ?? negativePrompt).trim();
+        const klingV26 = isAPIMartKlingV26Config(normalizedConfig, modelValue);
+        const klingV3 = isKlingV3Config(normalizedConfig, modelValue);
         const kling = klingV26 || klingV3;
+        const input = videoInputModeReferences(inputMode, referenceItems, firstFrameItem, lastFrameItem, videoReferenceItems, audioReferenceItems);
         if (!text) {
             message.error("请输入视频提示词");
             return null;
         }
-        if (!isAiConfigReady(configValue, modelValue)) {
+        if (!isAiConfigReady(normalizedConfig, modelValue)) {
             message.warning("请先完成配置");
             openConfigDialog(true);
             return null;
         }
-        if (kling && referenceItems.length > 2) {
+        if (kling && input.references.length > 2) {
             message.error("Kling 参考图最多 2 张");
             return null;
         }
-        if (klingV26 && boolConfig(configValue.videoGenerateAudio, false)) {
-            if (configValue.videoMode !== "pro") {
+        if (klingV26 && boolConfig(normalizedConfig.videoGenerateAudio, false)) {
+            if (normalizedConfig.videoMode !== "pro") {
                 message.error("Kling v2.6 音频生成需要 pro 模式");
                 return null;
             }
-            if (referenceItems.length > 1) {
+            if (input.references.length > 1) {
                 message.error("Kling v2.6 开启音频时最多 1 张参考图");
                 return null;
             }
         }
         if (klingV3) {
-            const elementError = validateKlingElementList(configValue.videoElementList);
+            const elementError = validateKlingElementList(normalizedConfig.videoElementList);
             if (elementError) {
                 message.error(elementError);
                 return null;
             }
         }
         if (!kling) {
-            const videoReferenceError = seedanceVideoReferenceError(videoReferenceItems);
+            const videoReferenceError = seedanceVideoReferenceError(input.videoReferences);
             if (videoReferenceError) {
                 message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
                 return null;
             }
         }
         const frameReferencesEnabled = !kling && supportsVideoFrameReferences(modelValue);
-        return { text, model: modelValue, config: buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue), references: [...referenceItems].slice(0, kling ? 2 : referenceItems.length), firstFrame: frameReferencesEnabled ? firstFrameItem : null, lastFrame: frameReferencesEnabled ? lastFrameItem : null, videoReferences: kling ? [] : [...videoReferenceItems], audioReferences: kling ? [] : [...audioReferenceItems], taskCount: normalizeVideoCount(taskCountValue) };
+        const referencesForRequest = frameReferencesEnabled
+            ? input.references
+            : [...input.references, ...[input.firstFrame, input.lastFrame].filter((item): item is ReferenceImage => Boolean(item))];
+        return { text, model: modelValue, config: buildVideoConfig({ ...normalizedConfig, videoNegativePrompt: currentNegativePrompt }, modelValue), references: referencesForRequest.slice(0, kling ? 2 : referencesForRequest.length), firstFrame: frameReferencesEnabled ? input.firstFrame : null, lastFrame: frameReferencesEnabled ? input.lastFrame : null, videoReferences: kling ? [] : input.videoReferences, audioReferences: kling ? [] : input.audioReferences, taskCount: normalizeVideoCount(taskCountValue), videoInputMode: inputMode, videoBitrate: bitrateValue };
     };
 
-    const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) => {
+    const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number; videoInputMode: CanvasVideoInputMode; videoBitrate: "standard" | "high" }) => {
         setRunning(true);
         setPreviewLog(null);
         setNow(Date.now());
         const pendingLogs = Array.from({ length: snapshot.taskCount }, () => {
             const clientTaskId = `client_video_task_${nanoid()}`;
             const task: VideoResponse = { id: clientTaskId, task_id: clientTaskId, model: snapshot.model, status: "queued", progress: 0, created_at: Date.now(), size: snapshot.config.size, seconds: snapshot.config.videoSeconds };
-            return buildLog({ prompt: snapshot.text, model: snapshot.model, config: snapshot.config, references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task, taskCount: snapshot.taskCount, lastPolledAt: Date.now() });
+            return buildLog({ prompt: snapshot.text, model: snapshot.model, config: snapshot.config, references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, videoInputMode: snapshot.videoInputMode, videoBitrate: snapshot.videoBitrate, durationMs: 0, status: "生成中", task, taskCount: snapshot.taskCount, lastPolledAt: Date.now() });
         });
         await Promise.all(pendingLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
         setLogs((value) => sortVideoLogs([...pendingLogs, ...value]));
@@ -646,7 +658,7 @@ export default function VideoPage() {
         }
     };
 
-    const runVideoTask = async (pendingLog: GenerationLog, snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) => {
+    const runVideoTask = async (pendingLog: GenerationLog, snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number; videoInputMode: CanvasVideoInputMode; videoBitrate: "standard" | "high" }) => {
         try {
             const created = await createVideoGenerationTask(snapshot.config, snapshot.text, { references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences }, (progress) => {
                 setResults((value) => updateResultByLogId(value, pendingLog.id, { progress }));
@@ -667,7 +679,7 @@ export default function VideoPage() {
 
     const retryResult = (result: GenerationResult) => {
         const retryChannelId = videoTaskChannelId(result.task);
-        const snapshot = buildRequestSnapshot({ promptText: result.prompt, negativePromptText: result.config.videoNegativePrompt || "", referenceItems: result.references, firstFrameItem: result.firstFrame, lastFrameItem: result.lastFrame, videoReferenceItems: result.videoReferences, audioReferenceItems: result.audioReferences, taskCountValue: 1, configValue: { ...videoConfig, ...result.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: result.model, videoModel: result.model }, modelValue: result.model });
+        const snapshot = buildRequestSnapshot({ promptText: result.prompt, negativePromptText: result.config.videoNegativePrompt || "", referenceItems: result.references, firstFrameItem: result.firstFrame, lastFrameItem: result.lastFrame, videoReferenceItems: result.videoReferences, audioReferenceItems: result.audioReferences, taskCountValue: 1, configValue: { ...videoConfig, ...result.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: result.model, videoModel: result.model }, modelValue: result.model, inputMode: result.videoInputMode || "all-reference", bitrateValue: result.videoBitrate || "high" });
         if (!snapshot) return;
         setResults((value) => value.filter((item) => item.id !== result.id));
         void submitGenerationSnapshot(snapshot);
@@ -683,6 +695,8 @@ export default function VideoPage() {
         setLastFrame(result.lastFrame || null);
         setVideoReferences(result.videoReferences || []);
         setAudioReferences(result.audioReferences || []);
+        setVideoInputMode(result.videoInputMode || "all-reference");
+        setVideoBitrate(result.videoBitrate || "high");
         const nextModel = result.config.videoModel || result.model;
         const nextChannelId = resolveVideoChannelId(effectiveConfig, nextModel, videoTaskChannelId(result.task), result.config.videoChannelId, result.config.activeChannelId);
         if (nextModel) updateConfig("videoModel", nextModel);
@@ -763,13 +777,13 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
-        const referenceImageLimit = isKlingWorkbench ? 2 : SEEDANCE_REFERENCE_LIMITS.images;
+        const limits = videoInputModeLimits(videoInputMode);
         const insertImage = async () => {
             if (payload.kind !== "image") {
                 message.warning("请选择图片素材");
                 return;
             }
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey }].slice(0, referenceImageLimit));
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey }].slice(0, Math.max(references.length, limits.images)));
         };
         const insertFrame = (slot: "first" | "last") => {
             if (payload.kind !== "image") {
@@ -780,27 +794,19 @@ export default function VideoPage() {
             slot === "first" ? setFirstFrame(next) : setLastFrame(next);
         };
         const insertVideo = () => {
-            if (isKlingWorkbench) {
-                message.warning("当前 Kling v2.6 不支持参考视频");
-                return;
-            }
             if (payload.kind !== "video") {
                 message.warning("请选择视频素材");
                 return;
             }
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, Math.max(videoReferences.length, limits.videos)));
         };
         const insertAudio = () => {
-            if (isKlingWorkbench) {
-                message.warning("当前 Kling v2.6 不支持参考音频");
-                return;
-            }
             if (payload.kind !== "audio") {
                 message.warning("请选择音频素材");
                 return;
             }
             const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, durationMs: payload.durationMs }], message.warning);
-            setAudioReferences((value) => [...value, ...next].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
+            setAudioReferences((value) => [...value, ...next].slice(0, Math.max(audioReferences.length, limits.audios)));
         };
 
         if (assetPickerTarget === "element") {
@@ -992,6 +998,8 @@ export default function VideoPage() {
         setLastFrame(log.lastFrame || null);
         setVideoReferences(log.videoReferences || []);
         setAudioReferences(log.audioReferences || []);
+        setVideoInputMode(log.videoInputMode || "all-reference");
+        setVideoBitrate(log.videoBitrate || "high");
         const nextModel = log.config.videoModel || log.model;
         const nextChannelId = resolveVideoChannelId(effectiveConfig, nextModel, videoTaskChannelId(log.task), log.config.videoChannelId, log.config.activeChannelId);
         if (nextModel) updateConfig("videoModel", nextModel);
@@ -1014,200 +1022,90 @@ export default function VideoPage() {
 
     const retryGenerationLog = (log: GenerationLog) => {
         const retryChannelId = videoTaskChannelId(log.task);
-        const snapshot = buildRequestSnapshot({ promptText: log.prompt, negativePromptText: log.config.videoNegativePrompt || "", referenceItems: log.references || [], firstFrameItem: log.firstFrame || null, lastFrameItem: log.lastFrame || null, videoReferenceItems: log.videoReferences || [], audioReferenceItems: log.audioReferences || [], taskCountValue: 1, configValue: { ...videoConfig, ...log.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: log.model, videoModel: log.model }, modelValue: log.model });
+        const snapshot = buildRequestSnapshot({ promptText: log.prompt, negativePromptText: log.config.videoNegativePrompt || "", referenceItems: log.references || [], firstFrameItem: log.firstFrame || null, lastFrameItem: log.lastFrame || null, videoReferenceItems: log.videoReferences || [], audioReferenceItems: log.audioReferences || [], taskCountValue: 1, configValue: { ...videoConfig, ...log.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: log.model, videoModel: log.model }, modelValue: log.model, inputMode: log.videoInputMode || "all-reference", bitrateValue: log.videoBitrate || "high" });
         if (!snapshot) return;
         void submitGenerationSnapshot(snapshot);
     };
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className={`${workbenchLayout === "side" ? "grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)]" : "relative flex flex-col"} min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:overflow-hidden`}>
-                {workbenchLayout === "side" ? (
-                    <>
-                        {isKlingWorkbench ? (
-                            <KlingV26WorkbenchPanel
-                                isKlingV3={klingWorkbenchVariant === "v3"}
-                                klingProvider={klingWorkbenchProvider}
-                                currentLayout={workbenchLayout}
-                                prompt={prompt}
-                                negativePrompt={negativePrompt}
-                                references={references}
-                                config={videoConfig}
-                                model={model}
-                                canGenerate={canGenerate}
-                                running={running}
-                                pendingCount={pendingCount}
-                                taskCount={taskCount}
-                                onTaskCountChange={setTaskCount}
-                                updateConfig={updateVideoConfig}
-                                openConfigDialog={openConfigDialog}
-                                onLayoutChange={setWorkbenchLayout}
-                                onPromptChange={setPrompt}
-                                onNegativePromptChange={(value) => { setNegativePrompt(value); updateConfig("videoNegativePrompt", value); }}
-                                onOpenPromptLibrary={() => setPromptDialogOpen(true)}
-                                onOpenAssetPicker={openAssetPicker}
-                                onPastePrompt={() => void pastePromptFromClipboard()}
-                                onClearPrompt={() => setPrompt("")}
-                                onPasteReferences={() => void addReferencesFromClipboard()}
-                                onUploadReferences={() => fileInputRef.current?.click()}
-                                onRemoveReference={(id) => void removeReference(id)}
-                                onMoveReference={(index, offset) => setReferences((value) => moveListItem(value, index, offset))}
-                                onPasteElementReferences={(index) => void addElementReferencesFromClipboard(index)}
-                                onUploadElementReferences={uploadElementReferences}
-                                onOpenElementAssetPicker={openElementAssetPicker}
-                                onRemoveElementReference={removeElementReference}
-                                onMoveElementReference={moveElementReference}
-                                onGenerate={() => void generate()}
-                            />
-                        ) : (
-                        <WorkbenchPanel
-                            layout="side"
-                            currentLayout={workbenchLayout}
-                            prompt={prompt}
-                            references={references}
-                            firstFrame={firstFrame}
-                            lastFrame={lastFrame}
-                            videoReferences={videoReferences}
-                            audioReferences={audioReferences}
-                            config={videoConfig}
-                            model={model}
-                            canGenerate={canGenerate}
-                            running={running}
-                            pendingCount={pendingCount}
-                            taskCount={taskCount}
-                            onTaskCountChange={setTaskCount}
-                            updateConfig={updateVideoConfig}
-                            openConfigDialog={openConfigDialog}
-                            onLayoutChange={setWorkbenchLayout}
-                            onPromptChange={setPrompt}
-                            onOpenPromptLibrary={() => setPromptDialogOpen(true)}
-                            onOpenAssetPicker={openAssetPicker}
-                            onPastePrompt={() => void pastePromptFromClipboard()}
-                            onClearPrompt={() => setPrompt("")}
-                            onPasteReferences={() => void addReferencesFromClipboard()}
-                            onPasteFrame={(slot) => void setFrameFromClipboard(slot)}
-                            onPasteVideoReferences={() => void addVideoReferencesFromClipboard()}
-                            onPasteAudioReferences={() => void addAudioReferencesFromClipboard()}
-                            onUploadReferences={() => fileInputRef.current?.click()}
-                            onUploadFrame={(slot) => (slot === "first" ? firstFrameInputRef.current?.click() : lastFrameInputRef.current?.click())}
-                            onRemoveFrame={(slot) => void removeFrameReference(slot)}
-                            onRemoveReference={(id) => void removeReference(id)}
-                            onMoveReference={(index, offset) => setReferences((value) => moveListItem(value, index, offset))}
-                            onRemoveVideoReference={(id) => void removeVideoReference(id)}
-                            onMoveVideoReference={(index, offset) => setVideoReferences((value) => moveListItem(value, index, offset))}
-                            onRemoveAudioReference={(id) => void removeAudioReference(id)}
-                            onMoveAudioReference={(index, offset) => setAudioReferences((value) => moveListItem(value, index, offset))}
-                            onGenerate={() => void generate()}
-                        />
-                        )}
-                        <ResultsPanel
-                            results={results}
-                            logs={logs}
-                            pendingCount={pendingCount}
-                            now={now}
-                            selectedLogIds={selectedLogIds}
-                            activeLogId={previewLog?.id}
-                            onSelectedLogIdsChange={setSelectedLogIds}
-                            onCreateSession={createSession}
-                            onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                            onDeleteLog={(log) => {
-                                setSelectedLogIds([log.id]);
-                                setDeleteConfirmOpen(true);
-                            }}
-                            onPreviewLog={previewGenerationLog}
-                            onRetryLog={retryGenerationLog}
-                            onPreviewResult={previewGenerationResult}
-                            onRetryResult={retryResult}
-                            onCopyPrompt={(value) => void copyPrompt(value, (content) => message.success(content))}
-                            onDownload={downloadVideo}
-                            onSyncResult={syncResultVideo}
-                            onSyncLog={syncLogVideo}
-                            onSaveAsset={saveResultToAssets}
-                            syncingVideoIds={syncingVideoIds}
-                        />
-                    </>
-                ) : (
-                    <>
-                        <ResultsPanel
-                            className="min-h-[360px] flex-1 pb-40 lg:pb-44"
-                            results={results}
-                            logs={logs}
-                            pendingCount={pendingCount}
-                            now={now}
-                            selectedLogIds={selectedLogIds}
-                            activeLogId={previewLog?.id}
-                            onSelectedLogIdsChange={setSelectedLogIds}
-                            onCreateSession={createSession}
-                            onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                            onDeleteLog={(log) => {
-                                setSelectedLogIds([log.id]);
-                                setDeleteConfirmOpen(true);
-                            }}
-                            onPreviewLog={previewGenerationLog}
-                            onRetryLog={retryGenerationLog}
-                            onPreviewResult={previewGenerationResult}
-                            onRetryResult={retryResult}
-                            onCopyPrompt={(value) => void copyPrompt(value, (content) => message.success(content))}
-                            onDownload={downloadVideo}
-                            onSyncResult={syncResultVideo}
-                            onSyncLog={syncLogVideo}
-                            onSaveAsset={saveResultToAssets}
-                            syncingVideoIds={syncingVideoIds}
-                        />
-                        <WorkbenchPanel
-                            layout="bottom"
-                            currentLayout={workbenchLayout}
-                            prompt={prompt}
-                            negativePrompt={negativePrompt}
-                            references={references}
-                            firstFrame={firstFrame}
-                            lastFrame={lastFrame}
-                            videoReferences={videoReferences}
-                            audioReferences={audioReferences}
-                            config={videoConfig}
-                            model={model}
-                            canGenerate={canGenerate}
-                            running={running}
-                            pendingCount={pendingCount}
-                            taskCount={taskCount}
-                            onTaskCountChange={setTaskCount}
-                            updateConfig={updateVideoConfig}
-                            openConfigDialog={openConfigDialog}
-                            onLayoutChange={setWorkbenchLayout}
-                            onPromptChange={setPrompt}
-                            onNegativePromptChange={(value) => { setNegativePrompt(value); updateConfig("videoNegativePrompt", value); }}
-                            onOpenPromptLibrary={() => setPromptDialogOpen(true)}
-                            onOpenAssetPicker={openAssetPicker}
-                            onPastePrompt={() => void pastePromptFromClipboard()}
-                            onClearPrompt={() => setPrompt("")}
-                            onPasteReferences={() => void addReferencesFromClipboard()}
-                            onPasteFrame={(slot) => void setFrameFromClipboard(slot)}
-                            onPasteVideoReferences={() => void addVideoReferencesFromClipboard()}
-                            onPasteAudioReferences={() => void addAudioReferencesFromClipboard()}
-                            onUploadReferences={() => fileInputRef.current?.click()}
-                            onUploadFrame={(slot) => (slot === "first" ? firstFrameInputRef.current?.click() : lastFrameInputRef.current?.click())}
-                            onRemoveFrame={(slot) => void removeFrameReference(slot)}
-                            onRemoveReference={(id) => void removeReference(id)}
-                            onMoveReference={(index, offset) => setReferences((value) => moveListItem(value, index, offset))}
-                            onRemoveVideoReference={(id) => void removeVideoReference(id)}
-                            onMoveVideoReference={(index, offset) => setVideoReferences((value) => moveListItem(value, index, offset))}
-                            onRemoveAudioReference={(id) => void removeAudioReference(id)}
-                            onMoveAudioReference={(index, offset) => setAudioReferences((value) => moveListItem(value, index, offset))}
-                            onGenerate={() => void generate()}
-                            bottomSettingsCollapsed={bottomSettingsCollapsed}
-                            setBottomSettingsCollapsed={setBottomSettingsCollapsed}
-                        />
-                    </>
-                )}
+            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[420px_minmax(0,1fr)] lg:overflow-hidden">
+                <WorkbenchPanel
+                    prompt={prompt}
+                    references={references}
+                    firstFrame={firstFrame}
+                    lastFrame={lastFrame}
+                    videoReferences={videoReferences}
+                    audioReferences={audioReferences}
+                    config={normalizedVideoConfig}
+                    model={model}
+                    capability={videoCapability}
+                    videoInputMode={videoInputMode}
+                    videoBitrate={videoBitrate}
+                    credits={credits}
+                    canGenerate={canGenerate}
+                    running={running}
+                    pendingCount={pendingCount}
+                    taskCount={taskCount}
+                    onTaskCountChange={setTaskCount}
+                    updateConfig={updateVideoConfig}
+                    openConfigDialog={openConfigDialog}
+                    onVideoInputModeChange={setVideoInputMode}
+                    onVideoBitrateChange={setVideoBitrate}
+                    onPromptChange={setPrompt}
+                    onOpenPromptLibrary={() => setPromptDialogOpen(true)}
+                    onOpenAssetPicker={openAssetPicker}
+                    onPastePrompt={() => void pastePromptFromClipboard()}
+                    onClearPrompt={() => setPrompt("")}
+                    onPasteReferences={() => void addReferencesFromClipboard()}
+                    onPasteFrame={(slot) => void setFrameFromClipboard(slot)}
+                    onPasteVideoReferences={() => void addVideoReferencesFromClipboard()}
+                    onPasteAudioReferences={() => void addAudioReferencesFromClipboard()}
+                    onUploadReferences={openReferenceUpload}
+                    onUploadFrame={(slot) => (slot === "first" ? firstFrameInputRef.current?.click() : lastFrameInputRef.current?.click())}
+                    onRemoveFrame={(slot) => void removeFrameReference(slot)}
+                    onRemoveReference={(id) => void removeReference(id)}
+                    onMoveReference={(index, offset) => setReferences((value) => moveListItem(value, index, offset))}
+                    onRemoveVideoReference={(id) => void removeVideoReference(id)}
+                    onMoveVideoReference={(index, offset) => setVideoReferences((value) => moveListItem(value, index, offset))}
+                    onRemoveAudioReference={(id) => void removeAudioReference(id)}
+                    onMoveAudioReference={(index, offset) => setAudioReferences((value) => moveListItem(value, index, offset))}
+                    onGenerate={() => void generate()}
+                />
+                <ResultsPanel
+                    results={results}
+                    logs={logs}
+                    pendingCount={pendingCount}
+                    now={now}
+                    selectedLogIds={selectedLogIds}
+                    activeLogId={previewLog?.id}
+                    onSelectedLogIdsChange={setSelectedLogIds}
+                    onCreateSession={createSession}
+                    onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                    onDeleteLog={(log) => {
+                        setSelectedLogIds([log.id]);
+                        setDeleteConfirmOpen(true);
+                    }}
+                    onPreviewLog={previewGenerationLog}
+                    onRetryLog={retryGenerationLog}
+                    onPreviewResult={previewGenerationResult}
+                    onRetryResult={retryResult}
+                    onCopyPrompt={(value) => void copyPrompt(value, (content) => message.success(content))}
+                    onDownload={downloadVideo}
+                    onSyncResult={syncResultVideo}
+                    onSyncLog={syncLogVideo}
+                    onSaveAsset={saveResultToAssets}
+                    syncingVideoIds={syncingVideoIds}
+                />
             </main>
             <input
                 ref={fileInputRef}
                 type="file"
-                accept={isKlingWorkbench ? "image/*" : "image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"}
+                accept={referenceUploadAccept(referenceUploadTarget)}
                 multiple
                 className="hidden"
                 onChange={(event) => {
-                    void addReferences(event.target.files);
+                    void addReferences(event.target.files, referenceUploadTargetRef.current);
                     event.target.value = "";
                 }}
             />
@@ -1252,10 +1150,7 @@ export default function VideoPage() {
 }
 
 function WorkbenchPanel({
-    layout,
-    currentLayout,
     prompt,
-    negativePrompt = "",
     references,
     firstFrame,
     lastFrame,
@@ -1263,6 +1158,10 @@ function WorkbenchPanel({
     audioReferences,
     config,
     model,
+    capability,
+    videoInputMode,
+    videoBitrate,
+    credits,
     canGenerate,
     running,
     pendingCount,
@@ -1270,9 +1169,9 @@ function WorkbenchPanel({
     onTaskCountChange,
     updateConfig,
     openConfigDialog,
-    onLayoutChange,
+    onVideoInputModeChange,
+    onVideoBitrateChange,
     onPromptChange,
-    onNegativePromptChange,
     onOpenPromptLibrary,
     onOpenAssetPicker,
     onPastePrompt,
@@ -1291,13 +1190,8 @@ function WorkbenchPanel({
     onRemoveAudioReference,
     onMoveAudioReference,
     onGenerate,
-    bottomSettingsCollapsed = true,
-    setBottomSettingsCollapsed,
 }: {
-    layout: WorkbenchLayout;
-    currentLayout: WorkbenchLayout;
     prompt: string;
-    negativePrompt?: string;
     references: ReferenceImage[];
     firstFrame: ReferenceImage | null;
     lastFrame: ReferenceImage | null;
@@ -1305,6 +1199,10 @@ function WorkbenchPanel({
     audioReferences: ReferenceAudio[];
     config: AiConfig;
     model: string;
+    capability: ModelCapabilityConfig;
+    videoInputMode: CanvasVideoInputMode;
+    videoBitrate: "standard" | "high";
+    credits: number;
     canGenerate: boolean;
     running: boolean;
     pendingCount: number;
@@ -1312,9 +1210,9 @@ function WorkbenchPanel({
     onTaskCountChange: (value: number) => void;
     updateConfig: UpdateAiConfig;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
-    onLayoutChange: (layout: WorkbenchLayout) => void;
+    onVideoInputModeChange: (mode: CanvasVideoInputMode) => void;
+    onVideoBitrateChange: (value: "standard" | "high") => void;
     onPromptChange: (value: string) => void;
-    onNegativePromptChange?: (value: string) => void;
     onOpenPromptLibrary: () => void;
     onOpenAssetPicker: (target?: AssetPickerTarget) => void;
     onPastePrompt: () => void;
@@ -1323,7 +1221,7 @@ function WorkbenchPanel({
     onPasteFrame: (slot: "first" | "last") => void;
     onPasteVideoReferences: () => void;
     onPasteAudioReferences: () => void;
-    onUploadReferences: () => void;
+    onUploadReferences: (target: ReferenceUploadTarget) => void;
     onUploadFrame: (slot: "first" | "last") => void;
     onRemoveFrame: (slot: "first" | "last") => void;
     onRemoveReference: (id: string) => void;
@@ -1333,107 +1231,20 @@ function WorkbenchPanel({
     onRemoveAudioReference: (id: string) => void;
     onMoveAudioReference: (index: number, offset: number) => void;
     onGenerate: () => void;
-    bottomSettingsCollapsed?: boolean;
-    setBottomSettingsCollapsed?: (value: boolean) => void;
 }) {
-    const frameReferencesEnabled = supportsVideoFrameReferences(model);
-    const audioGenerationEnabled = supportsVideoAudioGeneration(model);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
-    const klingBottomConfig = resolveKlingWorkbenchConfig(config, model);
-    const klingBottomVariant = klingBottomConfig?.variant || "";
-    const klingBottomProvider = klingBottomConfig?.provider || "apimart";
-    const klingBottom = Boolean(klingBottomConfig);
-    const showAudioSwitch = klingBottom || audioGenerationEnabled;
-    const motionControl = isAPIMartKlingMotionControlConfig(config, model) || isKIEKlingMotionControlConfig(config, model);
-    const bottomSettingsGridClass = motionControl
-        ? showAudioSwitch ? "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr_0.7fr_auto_auto]" : "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.7fr_auto_auto]"
-        : showAudioSwitch ? "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.8fr_0.7fr_auto_auto]" : "lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.7fr_0.7fr_auto_auto]";
-    const initializedKlingV3BottomSecondsRef = useRef(false);
-
-    useEffect(() => {
-        if (klingBottomVariant !== "v3" || initializedKlingV3BottomSecondsRef.current) return;
-        initializedKlingV3BottomSecondsRef.current = true;
-        if (String(config.videoSeconds || "").trim() === "6") updateConfig("videoSeconds", "3");
-    }, [config.videoSeconds, klingBottomVariant, updateConfig]);
-
-    if (layout === "bottom") {
-        return (
-            <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-5 sm:bottom-7 sm:px-10 lg:px-16">
-                <div className="pointer-events-auto w-full max-w-5xl rounded-[24px] bg-white/65 p-4 shadow-[0_32px_100px_rgba(15,23,42,.22),0_10px_34px_rgba(15,23,42,.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:bg-stone-950/60 dark:ring-white/10 dark:shadow-[0_34px_110px_rgba(0,0,0,.58)]">
-                    <div className="flex flex-col gap-3">
-                        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                            <Input.TextArea
-                                value={prompt}
-                                onChange={(event) => onPromptChange(event.target.value)}
-                                placeholder="描述镜头运动、主体动作、场景氛围和画面风格"
-                                autoSize={{ minRows: 2, maxRows: 4 }}
-                                className="rounded-2xl"
-                                onPressEnter={(event) => {
-                                    if (!event.shiftKey && canGenerate) onGenerate();
-                                }}
-                            />
-                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                                <Button title="清空输入" icon={<Trash2 className="size-4" />} onClick={onClearPrompt} />
-                                <Button title="提示词库" icon={<BookOpen className="size-4" />} onClick={onOpenPromptLibrary} />
-                                <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={() => onOpenAssetPicker()} />
-                                <Button title="参数配置" className={`lg:hidden ${!bottomSettingsCollapsed ? "!border-sky-500/30 !bg-sky-500/10 !text-sky-500" : ""}`} icon={<SlidersHorizontal className="size-4" />} onClick={() => setBottomSettingsCollapsed?.(!bottomSettingsCollapsed)} />
-                                <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
-                                <Button type="primary" className="h-9 rounded-xl px-4 font-medium lg:!hidden" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
-                                    {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
-                                </Button>
-                            </div>
-                        </div>
-                        {klingBottom && klingBottomProvider !== "kie" ? (
-                            <Input.TextArea
-                                value={negativePrompt}
-                                onChange={(event) => onNegativePromptChange?.(event.target.value)}
-                                placeholder="负面提示词"
-                                autoSize={{ minRows: 1, maxRows: 3 }}
-                                className="rounded-2xl"
-                            />
-                        ) : null}
-                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${bottomSettingsGridClass} ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
-                            <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
-                                模型
-                                <ModelPicker config={config} value={model} channelId={config.videoChannelId} onChange={(value, channelId) => { updateConfig("videoModel", value); if (channelId) updateConfig("videoChannelId", channelId); }} capability="video" className="canvas-compact-control !h-11 !rounded-xl" onMissingConfig={() => openConfigDialog(false)} fullWidth />
-                            </label>
-                            {klingBottom ? (
-                                <KlingV26BottomSettings config={config} updateConfig={updateConfig} generateAudio={generateAudio} isKlingV3={klingBottomVariant === "v3"} />
-                            ) : (
-                                <>
-                                    <QuickSelect label="清晰度" value={normalizeVideoResolutionValue(config.vquality)} options={quickResolutionOptions} onChange={(value) => updateConfig("vquality", value)} />
-                                    <QuickSelect label="尺寸" value={normalizeVideoSizeValue(config.size)} options={quickSizeOptions} onChange={(value) => updateConfig("size", value)} />
-                                    <QuickNumber label="秒数" value={normalizeVideoSeconds(config.videoSeconds)} min={1} max={30} onChange={(value) => updateConfig("videoSeconds", value)} />
-                                    {audioGenerationEnabled ? <QuickSwitch label="生成音频" checked={generateAudio} onChange={(checked) => updateConfig("videoGenerateAudio", String(checked))} /> : null}
-                                    {motionControl ? <QuickSelect label="角色朝向参考" value={normalizeCharacterOrientation(config.videoCharacterOrientation)} options={characterOrientationOptions} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
-                                </>
-                            )}
-                            <QuickNumber label="任务" value={String(taskCount)} min={1} max={6} onChange={(value) => onTaskCountChange(normalizeVideoCount(value))} />
-                            <ReferenceQuickActions imageCount={references.length} videoCount={videoReferences.length} audioCount={audioReferences.length} onPasteReferences={onPasteReferences} onUploadReferences={onUploadReferences} />
-                            <Button type="primary" className="hidden h-11 min-w-28 items-center justify-center gap-1.5 rounded-xl lg:flex" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
-                                {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
-                            </Button>
-                        </div>
-                        {firstFrame || lastFrame || references.length || videoReferences.length || audioReferences.length ? (
-                            <div className="grid gap-2">
-                                {firstFrame || lastFrame ? <FrameReferenceStrip firstFrame={firstFrame} lastFrame={lastFrame} compact onUploadFrame={onUploadFrame} onRemoveFrame={onRemoveFrame} /> : null}
-                                {references.length ? <ReferenceImageStrip references={references} compact onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} /> : null}
-                                {videoReferences.length ? <ReferenceVideoStrip references={videoReferences} compact onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} /> : null}
-                                {audioReferences.length ? <ReferenceAudioStrip references={audioReferences} compact onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} /> : null}
-                            </div>
-                        ) : null}
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <div className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800 lg:min-h-0">
             <div className="shrink-0 p-4 pb-3">
-                <WorkbenchHeader currentLayout={currentLayout} onLayoutChange={onLayoutChange} />
+                <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">视频创作台</h1>
             </div>
             <div className="thin-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3">
+                <WorkbenchSection title="视频模式">
+                    <div className="grid grid-cols-2 gap-1.5">
+                        {VIDEO_INPUT_MODE_OPTIONS.map((option) => (
+                            <button key={option.value} type="button" className={optionPillClass(videoInputMode === option.value)} onClick={() => onVideoInputModeChange(option.value)}>{option.label}</button>
+                        ))}
+                    </div>
+                </WorkbenchSection>
                 <WorkbenchSection title="提示词">
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
@@ -1445,63 +1256,73 @@ function WorkbenchPanel({
                         <Input.TextArea value={prompt} onChange={(event) => onPromptChange(event.target.value)} rows={6} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
                     </div>
                 </WorkbenchSection>
-                {frameReferencesEnabled ? (
+                {videoInputMode === "image-to-video" ? (
+                    <WorkbenchSection title="参考图片" count={Math.min(references.length, 1)}>
+                        <ReferenceImageControls onPaste={onPasteReferences} onUpload={() => onUploadReferences("image")} onOpenAssetPicker={() => onOpenAssetPicker("image")} />
+                        <ReferenceImageStrip references={references.slice(0, 1)} limit={1} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
+                        <DisabledVideoResources references={references.slice(1)} videoReferences={videoReferences} audioReferences={audioReferences} firstFrame={firstFrame} lastFrame={lastFrame} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} onRemoveFrame={onRemoveFrame} />
+                    </WorkbenchSection>
+                ) : null}
+                {videoInputMode === "first-last-frame" ? (
+                    <>
                     <WorkbenchSection title="首尾帧" count={[firstFrame, lastFrame].filter(Boolean).length}>
                         <FrameReferenceStrip firstFrame={firstFrame} lastFrame={lastFrame} onPasteFrame={onPasteFrame} onUploadFrame={onUploadFrame} onOpenAssetPicker={onOpenAssetPicker} onRemoveFrame={onRemoveFrame} />
                     </WorkbenchSection>
+                    <DisabledVideoResources references={references} videoReferences={videoReferences} audioReferences={audioReferences} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} />
+                    </>
                 ) : null}
-                <WorkbenchSection title="参考图" count={references.length}>
+                {videoInputMode === "all-reference" ? <>
+                <WorkbenchSection title="参考图" count={Math.min(references.length, 9)}>
                     <div className="space-y-2">
-                        <div className="flex flex-wrap gap-1">
-                            <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences}>剪切板</Button>
-                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUploadReferences}>上传</Button>
-                            <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker("image")}>从素材库选择</Button>
-                        </div>
-                        <ReferenceImageStrip references={references} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
+                        <ReferenceImageControls onPaste={onPasteReferences} onUpload={() => onUploadReferences("image")} onOpenAssetPicker={() => onOpenAssetPicker("image")} />
+                        <ReferenceImageStrip references={references.slice(0, 9)} limit={9} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
                     </div>
                 </WorkbenchSection>
-                <WorkbenchSection title="参考视频" count={videoReferences.length}>
+                <WorkbenchSection title="参考视频" count={Math.min(videoReferences.length, 3)}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteVideoReferences}>剪贴板</Button>
-                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUploadReferences}>上传</Button>
+                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => onUploadReferences("video")}>上传</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker("video")}>从素材库选择</Button>
                         </div>
-                        <ReferenceVideoStrip references={videoReferences} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
+                        <ReferenceVideoStrip references={videoReferences.slice(0, 3)} limit={3} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
                     </div>
                 </WorkbenchSection>
-                <WorkbenchSection title="参考音频" count={audioReferences.length}>
+                <WorkbenchSection title="参考音频" count={Math.min(audioReferences.length, 3)}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteAudioReferences}>剪贴板</Button>
-                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUploadReferences}>上传</Button>
+                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => onUploadReferences("audio")}>上传</Button>
                             <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker("audio")}>从素材库选择</Button>
                         </div>
-                        <ReferenceAudioStrip references={audioReferences} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
+                        <ReferenceAudioStrip references={audioReferences.slice(0, 3)} limit={3} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
                     </div>
                 </WorkbenchSection>
-                {motionControl ? <CharacterOrientationSetting value={config.videoCharacterOrientation} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
-                <GenerationSettings config={config} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                <DisabledVideoResources references={references.slice(9)} videoReferences={videoReferences.slice(3)} audioReferences={audioReferences.slice(3)} firstFrame={firstFrame} lastFrame={lastFrame} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} onRemoveFrame={onRemoveFrame} />
+                </> : null}
+                {videoInputMode === "video-continuation" ? (
+                    <WorkbenchSection title="续写视频" count={Math.min(videoReferences.length, 1)}>
+                        <div className="space-y-2">
+                            <div className="flex flex-wrap gap-1">
+                                <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteVideoReferences}>剪贴板</Button>
+                                <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => onUploadReferences("video")}>上传</Button>
+                                <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => onOpenAssetPicker("video")}>从素材库选择</Button>
+                            </div>
+                            <ReferenceVideoStrip references={videoReferences.slice(0, 1)} limit={1} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
+                        </div>
+                        <DisabledVideoResources references={references} videoReferences={videoReferences.slice(1)} audioReferences={audioReferences} firstFrame={firstFrame} lastFrame={lastFrame} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} onRemoveFrame={onRemoveFrame} />
+                    </WorkbenchSection>
+                ) : null}
+                {videoInputMode === "text-to-video" ? <DisabledVideoResources references={references} videoReferences={videoReferences} audioReferences={audioReferences} firstFrame={firstFrame} lastFrame={lastFrame} onRemoveReference={onRemoveReference} onRemoveVideoReference={onRemoveVideoReference} onRemoveAudioReference={onRemoveAudioReference} onRemoveFrame={onRemoveFrame} /> : null}
+                <GenerationSettings config={config} model={model} capability={capability} bitrate={videoBitrate} updateConfig={updateConfig} openConfigDialog={openConfigDialog} onBitrateChange={onVideoBitrateChange} />
                 <WorkbenchSection title="任务数量">
                     <TaskCountControl value={taskCount} onChange={onTaskCountChange} />
                 </WorkbenchSection>
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
-                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
-                    {pendingCount ? `生成中（${pendingCount}）` : "开始生成"}
+                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate} onClick={onGenerate}>
+                    <span className="inline-flex items-center gap-1.5"><CreditSymbol />{credits.toLocaleString()} {pendingCount ? `继续提交（${pendingCount} 个生成中）` : "开始生成"}</span>
                 </Button>
-            </div>
-        </div>
-    );
-}
-
-function WorkbenchHeader({ currentLayout, onLayoutChange }: { currentLayout: WorkbenchLayout; onLayoutChange: (layout: WorkbenchLayout) => void }) {
-    return (
-        <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">视频创作台</h1>
-            <div className="flex shrink-0 rounded-lg border border-stone-200 bg-stone-50 p-1 dark:border-stone-800 dark:bg-stone-900">
-                <Button size="small" type={currentLayout === "side" ? "primary" : "text"} icon={<PanelLeft className="size-3.5" />} onClick={() => onLayoutChange("side")}>侧边</Button>
-                <Button size="small" type={currentLayout === "bottom" ? "primary" : "text"} icon={<PanelBottom className="size-3.5" />} onClick={() => onLayoutChange("bottom")}>底部</Button>
             </div>
         </div>
     );
@@ -1574,7 +1395,7 @@ function FrameReferenceSlot({ label, reference, compact, onUpload, onRemove }: {
     );
 }
 
-function ReferenceImageStrip({ references, compact = false, onRemoveReference, onMoveReference }: { references: ReferenceImage[]; compact?: boolean; onRemoveReference: (id: string) => void; onMoveReference: (index: number, offset: number) => void }) {
+function ReferenceImageStrip({ references, limit, compact = false, onRemoveReference, onMoveReference }: { references: ReferenceImage[]; limit?: number; compact?: boolean; onRemoveReference: (id: string) => void; onMoveReference: (index: number, offset: number) => void }) {
     return (
         <div className={`hover-scrollbar hover-scrollbar-hint flex w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 overscroll-x-contain dark:border-stone-700 ${compact ? "min-h-14" : "min-h-24 pb-3"}`}>
             {references.map((item, index) => (
@@ -1587,12 +1408,12 @@ function ReferenceImageStrip({ references, compact = false, onRemoveReference, o
                     </button>
                 </div>
             ))}
-            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图，最多 9 张</div> : null}
+            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图{limit ? `，最多 ${limit} 张` : ""}</div> : null}
         </div>
     );
 }
 
-function ReferenceVideoStrip({ references, compact = false, onRemoveReference, onMoveReference }: { references: ReferenceVideo[]; compact?: boolean; onRemoveReference: (id: string) => void; onMoveReference: (index: number, offset: number) => void }) {
+function ReferenceVideoStrip({ references, limit, compact = false, onRemoveReference, onMoveReference }: { references: ReferenceVideo[]; limit?: number; compact?: boolean; onRemoveReference: (id: string) => void; onMoveReference: (index: number, offset: number) => void }) {
     return (
         <div className={`hover-scrollbar hover-scrollbar-hint flex w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 overscroll-x-contain dark:border-stone-700 ${compact ? "min-h-14" : "min-h-24 pb-3"}`}>
             {references.map((item, index) => (
@@ -1605,12 +1426,12 @@ function ReferenceVideoStrip({ references, compact = false, onRemoveReference, o
                     </button>
                 </div>
             ))}
-            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
+            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频{limit ? `，最多 ${limit} 个` : ""}</div> : null}
         </div>
     );
 }
 
-function ReferenceAudioStrip({ references, compact = false, onRemoveReference, onMoveReference }: { references: ReferenceAudio[]; compact?: boolean; onRemoveReference: (id: string) => void; onMoveReference: (index: number, offset: number) => void }) {
+function ReferenceAudioStrip({ references, limit, compact = false, onRemoveReference, onMoveReference }: { references: ReferenceAudio[]; limit?: number; compact?: boolean; onRemoveReference: (id: string) => void; onMoveReference: (index: number, offset: number) => void }) {
     return (
         <div className={`hover-scrollbar hover-scrollbar-hint flex w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 overscroll-x-contain dark:border-stone-700 ${compact ? "min-h-14" : "min-h-24 pb-3"}`}>
             {references.map((item, index) => (
@@ -1627,17 +1448,34 @@ function ReferenceAudioStrip({ references, compact = false, onRemoveReference, o
                     </button>
                 </div>
             ))}
-            {!references.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">暂无参考音频，最多 3 个，mp3/wav，单个 15MB 内</div> : null}
+            {!references.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">暂无参考音频{limit ? `，最多 ${limit} 个` : ""}，mp3/wav，单个 15MB 内</div> : null}
         </div>
     );
 }
 
-function ReferenceQuickActions({ imageCount, videoCount, audioCount, onPasteReferences, onUploadReferences }: { imageCount: number; videoCount: number; audioCount: number; onPasteReferences: () => void; onUploadReferences: () => void }) {
+function ReferenceImageControls({ onPaste, onUpload, onOpenAssetPicker }: { onPaste: () => void; onUpload: () => void; onOpenAssetPicker: () => void }) {
     return (
-        <div className="flex h-11 items-center gap-1 rounded-xl border border-stone-200 bg-background px-2 dark:border-stone-800">
-            {imageCount || videoCount || audioCount ? <span className="min-w-7 text-xs text-stone-500">{imageCount + videoCount + audioCount} 个</span> : null}
-            <Button title="读取剪切板" size="small" type="text" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences} />
-            <Button title="上传参考素材" size="small" type="text" icon={<Upload className="size-3.5" />} onClick={onUploadReferences} />
+        <div className="flex flex-wrap gap-1">
+            <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPaste}>剪贴板</Button>
+            <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUpload}>上传</Button>
+            <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onOpenAssetPicker}>从素材库选择</Button>
+        </div>
+    );
+}
+
+function DisabledVideoResources({ references, videoReferences, audioReferences, firstFrame, lastFrame, onRemoveReference, onRemoveVideoReference, onRemoveAudioReference, onRemoveFrame }: { references: ReferenceImage[]; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; onRemoveReference: (id: string) => void; onRemoveVideoReference: (id: string) => void; onRemoveAudioReference: (id: string) => void; onRemoveFrame?: (slot: "first" | "last") => void }) {
+    const hasResources = references.length || videoReferences.length || audioReferences.length || firstFrame || lastFrame;
+    if (!hasResources) return null;
+    return (
+        <div className="space-y-2 border-t border-dashed border-stone-300 pt-3 dark:border-stone-700">
+            <div className="text-xs font-medium text-stone-500 dark:text-stone-400">当前模式不参与生成的素材</div>
+            <div className="space-y-2 opacity-55">
+                {firstFrame || lastFrame ? <FrameReferenceStrip firstFrame={firstFrame || null} lastFrame={lastFrame || null} compact onUploadFrame={() => undefined} onRemoveFrame={(slot) => onRemoveFrame?.(slot)} /> : null}
+                {references.length ? <ReferenceImageStrip references={references} compact onRemoveReference={onRemoveReference} onMoveReference={() => undefined} /> : null}
+                {videoReferences.length ? <ReferenceVideoStrip references={videoReferences} compact onRemoveReference={onRemoveVideoReference} onMoveReference={() => undefined} /> : null}
+                {audioReferences.length ? <ReferenceAudioStrip references={audioReferences} compact onRemoveReference={onRemoveAudioReference} onMoveReference={() => undefined} /> : null}
+            </div>
+            <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">这些素材会保留，切换到可用的视频模式后可继续使用。</p>
         </div>
     );
 }
@@ -1651,21 +1489,6 @@ function TaskCountControl({ value, onChange }: { value: number; onChange: (value
     );
 }
 
-function CharacterOrientationSetting({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-    const current = normalizeCharacterOrientation(value);
-    return (
-        <WorkbenchSection title="角色朝向参考">
-            <div className="grid grid-cols-2 gap-2.5">
-                {characterOrientationOptions.map((item) => (
-                    <button key={item.value} type="button" className={optionPillClass(current === item.value)} onClick={() => onChange(item.value)}>
-                        {item.label}
-                    </button>
-                ))}
-            </div>
-        </WorkbenchSection>
-    );
-}
-
 function optionPillClass(active: boolean) {
     return [
         "h-9 rounded-full border bg-transparent px-2 text-sm font-medium transition hover:opacity-80",
@@ -1673,61 +1496,7 @@ function optionPillClass(active: boolean) {
     ].join(" ");
 }
 
-function QuickSelect({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
-    return (
-        <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
-            {label}
-            <select className="h-11 min-w-0 rounded-xl border border-stone-200 bg-background px-3 text-sm text-stone-900 outline-none dark:border-stone-800 dark:text-stone-100" value={value} onChange={(event) => onChange(event.target.value)}>
-                {options.map((item) => (
-                    <option key={item.value} value={item.value}>
-                        {item.label}
-                    </option>
-                ))}
-            </select>
-        </label>
-    );
-}
-
-function QuickNumber({ label, value, min, max, onChange, clampOnChange = true }: { label: string; value: string; min: number; max: number; onChange: (value: string) => void; clampOnChange?: boolean }) {
-    return (
-        <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
-            {label}
-            <input className="h-11 min-w-0 rounded-xl border border-stone-200 bg-background px-3 text-sm text-stone-900 outline-none dark:border-stone-800 dark:text-stone-100" type="number" min={min} max={max} value={value} onChange={(event) => onChange(clampOnChange ? clampQuickNumberValue(event.target.value, min, max) : event.target.value)} onBlur={(event) => onChange(clampQuickNumberValue(event.target.value, min, max))} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
-        </label>
-    );
-}
-
-function clampQuickNumberValue(value: string, min: number, max: number) {
-    const number = Math.floor(Number(value) || min);
-    return String(Math.max(min, Math.min(max, number)));
-}
-
-function KlingV26BottomSettings({ config, updateConfig, generateAudio, isKlingV3 }: { config: AiConfig; updateConfig: UpdateAiConfig; generateAudio: boolean; isKlingV3: boolean }) {
-    const mode = isKlingV3 && config.videoMode === "4k" ? "4k" : config.videoMode === "pro" ? "pro" : "std";
-    const modeOptions = isKlingV3 ? [{ value: "std", label: "720P" }, { value: "pro", label: "1080P" }, { value: "4k", label: "4K" }] : [{ value: "std", label: "标准(720P 无声)" }, { value: "pro", label: "专业(1080P 音频)" }];
-    return (
-        <>
-            <QuickSelect label="模式选择" value={mode} options={modeOptions} onChange={(value) => updateConfig("videoMode", value)} />
-            <QuickSelect label="尺寸" value={klingBottomSizeValue(config.size)} options={[{ value: "16:9", label: "16:9" }, { value: "9:16", label: "9:16" }, { value: "1:1", label: "1:1" }]} onChange={(value) => updateConfig("size", value === "1:1" ? "1024x1024" : value)} />
-            <QuickNumber label="秒数" value={isKlingV3 ? String(config.videoSeconds ?? "") : normalizeKlingV26Seconds(config.videoSeconds)} min={isKlingV3 ? 3 : 5} max={isKlingV3 ? 15 : 10} onChange={(value) => updateConfig("videoSeconds", isKlingV3 ? value : normalizeKlingV26Seconds(value))} clampOnChange={!isKlingV3} />
-            <QuickSwitch label="生成音频" checked={generateAudio} onChange={(checked) => updateConfig("videoGenerateAudio", String(checked))} />
-        </>
-    );
-}
-
-
-function QuickSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-    return (
-        <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
-            {label}
-            <span className="flex h-11 items-center justify-center rounded-xl border border-stone-200 bg-background px-3 dark:border-stone-800">
-                <Switch size="small" checked={checked} onChange={onChange} />
-            </span>
-        </label>
-    );
-}
-
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, capability, bitrate, updateConfig, openConfigDialog, onBitrateChange }: { config: AiConfig; model: string; capability: ModelCapabilityConfig; bitrate: "standard" | "high"; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; onBitrateChange: (value: "standard" | "high") => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -1735,7 +1504,17 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
             <WorkbenchSection title="模型">
                 <ModelPicker config={config} value={model} channelId={config.videoChannelId} onChange={(value, channelId) => { updateConfig("videoModel", value); if (channelId) updateConfig("videoChannelId", channelId); }} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </WorkbenchSection>
-            <VideoSettingsPanel config={config} modelName={model} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" />
+            <section className="rounded-lg border border-stone-200 bg-background p-3 dark:border-stone-800">
+                <CanvasNodeVideoSettingsPanel
+                    config={config}
+                    theme={theme}
+                    capability={capability}
+                    audioSupported={capability.videoGenerateAudio}
+                    metadata={{ videoBitrate: bitrate }}
+                    onConfigChange={(key, value) => updateConfig(key, value)}
+                    onMetadataChange={(patch) => onBitrateChange(patch.videoBitrate === "standard" ? "standard" : "high")}
+                />
+            </section>
         </div>
     );
 }
@@ -2010,7 +1789,7 @@ function ReferenceThumbnailOverlay({ references, className = "" }: { references?
     );
 }
 
-function createResultFromSnapshot(id: string, snapshot: { text: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount?: number }, model: string, status: GenerationResult["status"], extra: Partial<GenerationResult> = {}): GenerationResult {
+function createResultFromSnapshot(id: string, snapshot: { text: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount?: number; videoInputMode?: CanvasVideoInputMode; videoBitrate?: "standard" | "high" }, model: string, status: GenerationResult["status"], extra: Partial<GenerationResult> = {}): GenerationResult {
     return {
         id,
         status,
@@ -2023,6 +1802,8 @@ function createResultFromSnapshot(id: string, snapshot: { text: string; config: 
         lastFrame: snapshot.lastFrame || null,
         videoReferences: snapshot.videoReferences,
         audioReferences: snapshot.audioReferences,
+        videoInputMode: snapshot.videoInputMode || "text-to-video",
+        videoBitrate: snapshot.videoBitrate || "high",
         taskCount: snapshot.taskCount,
         ...extra,
     };
@@ -2042,6 +1823,8 @@ function createResultFromLog(log: GenerationLog, status: GenerationResult["statu
         lastFrame: log.lastFrame || null,
         videoReferences: log.videoReferences || [],
         audioReferences: log.audioReferences || [],
+        videoInputMode: log.videoInputMode,
+        videoBitrate: log.videoBitrate,
         taskCount: log.taskCount,
         durationMs: log.durationMs,
         progress: log.task?.progress,
@@ -2225,6 +2008,8 @@ function backendTaskToLog(task: VideoResponse, fallbackConfig: AiConfig): Genera
         lastFrame: null,
         videoReferences: [],
         audioReferences: [],
+        videoInputMode: "text-to-video",
+        videoBitrate: "high",
         durationMs,
         size: task.size || request.size || config.size,
         resolution: request.resolution || config.vquality,
@@ -2593,6 +2378,8 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         lastFrame,
         videoReferences,
         audioReferences,
+        videoInputMode: log.videoInputMode === "image-to-video" || log.videoInputMode === "first-last-frame" || log.videoInputMode === "all-reference" || log.videoInputMode === "video-continuation" ? log.videoInputMode : "text-to-video",
+        videoBitrate: log.videoBitrate === "standard" ? "standard" : "high",
         taskCount: log.taskCount,
         durationMs: log.durationMs || 0,
         size: log.size || config.size || "",
@@ -2685,7 +2472,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     };
 }
 
-function buildLog({ prompt, model, config, references, firstFrame, lastFrame, videoReferences, audioReferences, taskCount, durationMs, status, task, video, error, errorDetail, lastPolledAt }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount?: number; durationMs: number; status: GenerationLog["status"]; task?: VideoResponse; video?: GeneratedVideo; error?: string; errorDetail?: string; lastPolledAt?: number }): GenerationLog {
+function buildLog({ prompt, model, config, references, firstFrame, lastFrame, videoReferences, audioReferences, videoInputMode, videoBitrate, taskCount, durationMs, status, task, video, error, errorDetail, lastPolledAt }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; videoInputMode: CanvasVideoInputMode; videoBitrate: "standard" | "high"; taskCount?: number; durationMs: number; status: GenerationLog["status"]; task?: VideoResponse; video?: GeneratedVideo; error?: string; errorDetail?: string; lastPolledAt?: number }): GenerationLog {
     const logConfig = {
         channelMode: config.channelMode,
         activeChannelId: config.activeChannelId,
@@ -2718,6 +2505,8 @@ function buildLog({ prompt, model, config, references, firstFrame, lastFrame, vi
         lastFrame: lastFrame || null,
         videoReferences,
         audioReferences,
+        videoInputMode,
+        videoBitrate,
         taskCount,
         durationMs,
         size: logConfig.size,
@@ -2801,13 +2590,6 @@ function isKIEKlingMotionControlConfig(config: AiConfig, model: string) {
     return isKIEKlingModelConfig(config, model, "kling-2-6-motion-control") || isKIEKlingModelConfig(config, model, "kling-3-0-motion-control");
 }
 
-function resolveKlingWorkbenchConfig(config: AiConfig, model: string): { provider: "apimart" | "kie"; variant: "v26" | "v3" } | null {
-    if (isAPIMartKlingV26Config(config, model)) return { provider: "apimart", variant: "v26" };
-    if (isAPIMartKlingV3Config(config, model)) return { provider: "apimart", variant: "v3" };
-    if (isKIEKlingV3Config(config, model)) return { provider: "kie", variant: "v3" };
-    return null;
-}
-
 function isAPIMartKlingModelConfig(config: AiConfig, model: string, key: string) {
     return modelKey(model) === key && videoChannelText(config, model).includes("apimart");
 }
@@ -2824,17 +2606,8 @@ function videoChannelText(config: AiConfig, model: string) {
     return [record?.id, record?.name, record?.baseUrl, record?.remark].filter(Boolean).join(" ").toLowerCase();
 }
 
-const characterOrientationOptions = [{ value: "image", label: "图片" }, { value: "video", label: "视频" }];
-
 function normalizeCharacterOrientation(value: string | undefined) {
     return value === "image" ? "image" : "video";
-}
-
-function klingBottomSizeValue(value: string) {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (["9:16", "720x1280", "1080x1920"].includes(normalized)) return "9:16";
-    if (["1024x1024", "1080x1080"].includes(normalized)) return "1:1";
-    return "16:9";
 }
 
 function normalizeKlingV26Ratio(value: string) {
@@ -2949,6 +2722,56 @@ function normalizeVideoSeconds(value: string) {
     if (String(value).trim() === "-1") return "-1";
     const seconds = Math.floor(Number(value) || 6);
     return String(Math.max(1, Math.min(30, seconds)));
+}
+
+function normalizeVideoWorkbenchConfig(config: AiConfig, modelCosts: Parameters<typeof modelCapabilityFor>[0], model: string) {
+    const capability = modelCapabilityFor(modelCosts, model);
+    const ratios = capability.ratios.length ? capability.ratios : ["21:9"];
+    const qualities = capability.videoQualities.length ? capability.videoQualities : ["720p"];
+    const preferredRatio = firstAllowed("21:9", ratios, ratios[0]);
+    const preferredQuality = firstAllowed("720p", qualities, qualities[0]);
+    const ratio = firstAllowed(normalizeSeedanceRatio(config.size), ratios, preferredRatio);
+    const vquality = firstAllowed(normalizeVideoCapabilityQuality(config.vquality), qualities, preferredQuality);
+    const videoSeconds = capability.fixedDuration
+        ? firstAllowed(config.videoSeconds || "5", capability.durationOptions, capability.durationOptions[0] || "5")
+        : String(Math.max(1, Math.min(capability.maxSeconds || 15, Number(config.videoSeconds) || 5)));
+    return {
+        ...config,
+        model,
+        videoModel: model,
+        size: videoSizeForCapability(ratio, { ...capability, ratios, videoQualities: qualities }, vquality),
+        vquality,
+        videoSeconds,
+        videoGenerateAudio: capability.videoGenerateAudio && config.videoGenerateAudio === "true" ? "true" : "false",
+    };
+}
+
+function videoInputModeLimits(mode: CanvasVideoInputMode) {
+    if (mode === "image-to-video") return { images: 1, videos: 0, audios: 0 };
+    if (mode === "first-last-frame") return { images: 0, videos: 0, audios: 0 };
+    if (mode === "all-reference") return { images: 9, videos: 3, audios: 3 };
+    if (mode === "video-continuation") return { images: 0, videos: 1, audios: 0 };
+    return { images: 0, videos: 0, audios: 0 };
+}
+
+function normalizeVideoCapabilityQuality(value: string) {
+    const normalized = normalizeResolution(value);
+    return ["480", "720", "768", "1080"].includes(normalized) ? `${normalized}p` : normalized;
+}
+
+function videoInputModeReferences(mode: CanvasVideoInputMode, references: ReferenceImage[], firstFrame: ReferenceImage | null, lastFrame: ReferenceImage | null, videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
+    if (mode === "image-to-video") return { references: references.slice(0, 1), firstFrame: null, lastFrame: null, videoReferences: [], audioReferences: [] };
+    if (mode === "first-last-frame") return { references: [], firstFrame, lastFrame, videoReferences: [], audioReferences: [] };
+    if (mode === "all-reference") return { references: references.slice(0, 9), firstFrame: null, lastFrame: null, videoReferences: videoReferences.slice(0, 3), audioReferences: audioReferences.slice(0, 3) };
+    if (mode === "video-continuation") return { references: [], firstFrame: null, lastFrame: null, videoReferences: videoReferences.slice(0, 1), audioReferences: [] };
+    return { references: [], firstFrame: null, lastFrame: null, videoReferences: [], audioReferences: [] };
+}
+
+function referenceUploadAccept(target: ReferenceUploadTarget) {
+    if (target === "image") return "image/*";
+    if (target === "video") return "video/mp4,video/quicktime";
+    if (target === "audio") return "audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav";
+    return "image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav";
 }
 
 function normalizeVideoSize(value: string) {
