@@ -15,6 +15,9 @@ import type { CanvasResourceReference } from "../utils/canvas-resource-reference
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
+const IMAGE_GENERATION_DURATION_MS = 90_000;
+const VIDEO_GENERATION_DURATION_MS = 7 * 60_000;
+const GENERATION_PROGRESS_START = 18;
 const CanvasPanoramaViewer = dynamic(() => import("./canvas-panorama-viewer"), { ssr: false, loading: () => null });
 
 type CanvasNodeProps = {
@@ -451,9 +454,10 @@ export const CanvasNode = React.memo(function CanvasNode({
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Group) return null;
-    if ((props.node.type === CanvasNodeType.Config || props.node.type === CanvasNodeType.Director) && props.renderNodeContent) return props.renderNodeContent(props.node);
-    if (props.isBatchRoot) return props.node.type === CanvasNodeType.Panorama ? <PanoramaNodeContent {...props} /> : <ImageNodeContent {...props} />;
+    if (props.node.type === CanvasNodeType.Director && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} now={props.now} />;
+    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
+    if (props.isBatchRoot) return props.node.type === CanvasNodeType.Panorama ? <PanoramaNodeContent {...props} /> : <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
@@ -481,6 +485,11 @@ function LoadingContent({ node, theme, now }: Pick<NodeContentRendererProps, "no
     const currentNow = now ?? localNow;
     const startedAt = typeof node.metadata?.startedAt === "number" ? node.metadata.startedAt : startTimeRef.current;
     const elapsedMs = Math.max(0, currentNow - startedAt);
+
+    if (isCanvasImageNodeType(node.type) || node.type === CanvasNodeType.Video) {
+        const progress = generationProgress(node.metadata?.progress, elapsedMs, node.type);
+        return <GenerationProgressWater progress={progress} elapsedMs={elapsedMs} theme={theme} />;
+    }
     const progress = Math.max(0, Math.min(100, Math.round(node.metadata?.progress || 0)));
 
     return (
@@ -495,6 +504,32 @@ function LoadingContent({ node, theme, now }: Pick<NodeContentRendererProps, "no
                     <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: theme.node.activeStroke }} />
                 </div>
             ) : null}
+        </div>
+    );
+}
+
+function generationProgress(reportedProgress: number | undefined, elapsedMs: number, type: CanvasNodeType) {
+    const duration = type === CanvasNodeType.Video ? VIDEO_GENERATION_DURATION_MS : IMAGE_GENERATION_DURATION_MS;
+    const elapsedRatio = Math.min(1, Math.max(0, elapsedMs) / duration);
+    const timedProgress = Math.min(99, Math.floor(GENERATION_PROGRESS_START + (1 - (1 - elapsedRatio) ** 2) * (99 - GENERATION_PROGRESS_START)));
+    return Math.max(timedProgress, Math.min(99, Math.max(0, Math.round(reportedProgress || 0))));
+}
+
+function GenerationProgressWater({ progress, elapsedMs, theme }: { progress: number; elapsedMs: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const waterFill = `color-mix(in srgb, ${theme.node.activeStroke} 22%, ${theme.node.fill})`;
+    const waveSurface = `color-mix(in srgb, ${theme.node.activeStroke} 12%, ${theme.node.fill})`;
+    return (
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden px-5 text-center" style={{ color: theme.node.text }}>
+            <div aria-hidden className="pointer-events-none absolute inset-0 z-0 backdrop-blur-[2px]" style={{ background: `${theme.node.panel}1f` }} />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] overflow-visible transition-[height] duration-1000 ease-linear" style={{ height: `${progress}%`, background: waterFill, opacity: 0.76 }}>
+                <svg aria-hidden viewBox="0 0 480 52" preserveAspectRatio="none" className="absolute -left-full -top-6 h-12 w-[300%]" style={{ animation: "canvas-generation-wave 5.2s linear infinite", willChange: "transform" }}>
+                    <path d="M0 26 C28 4 52 4 80 26 C108 48 132 48 160 26 C188 4 212 4 240 26 C268 48 292 48 320 26 C348 4 372 4 400 26 C428 48 452 48 480 26 V52 H0Z" fill={waveSurface} />
+                </svg>
+            </div>
+            <div className="relative z-10 flex flex-col items-center gap-2.5">
+                <span className="text-2xl font-semibold leading-none [text-shadow:0_1px_2px_rgba(0,0,0,.45)]">{progress}%</span>
+                <span className="text-xs opacity-90 [text-shadow:0_1px_2px_rgba(0,0,0,.45)]">{formatDuration(elapsedMs)}</span>
+            </div>
         </div>
     );
 }
@@ -798,22 +833,9 @@ function ImageGenerationOverlay({ node, theme }: Pick<NodeContentRendererProps, 
     const startedAt = Math.min(...loadingCandidates.map((candidate) => candidate.startedAt || startTimeRef.current));
     const elapsedMs = Math.max(0, localNow - startedAt);
     const reportedProgress = loadingCandidates.reduce((progress, candidate) => Math.max(progress, candidate.progress || 0), 0);
-    const progress = Math.max(0, Math.min(100, Math.round(reportedProgress)));
+    const progress = generationProgress(reportedProgress, elapsedMs, node.type);
 
-    return (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl bg-black/55 px-5 text-center backdrop-blur-md" style={{ color: theme.node.text }}>
-            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: `${theme.node.text}4d`, borderTopColor: theme.node.text }} />
-            <span className="text-xs font-medium tracking-[0.18em]">{progress > 0 ? `生成中 ${progress}%` : "生成中"}</span>
-            <span className="rounded-full border px-2.5 py-1 text-xs" style={{ borderColor: `${theme.node.text}3d`, background: "rgba(0,0,0,.16)" }}>
-                {formatDuration(elapsedMs)}
-            </span>
-            {progress > 0 ? (
-                <div className="h-1.5 w-32 overflow-hidden rounded-full" style={{ background: `${theme.node.text}33` }}>
-                    <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: theme.node.text }} />
-                </div>
-            ) : null}
-        </div>
-    );
+    return <div className="absolute inset-0 z-20 rounded-3xl"><GenerationProgressWater progress={progress} elapsedMs={elapsedMs} theme={theme} /></div>;
 }
 
 function VideoContent({ node, theme, onOpenCandidatePicker }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onOpenCandidatePicker?: () => void }) {
@@ -865,22 +887,9 @@ function VideoGenerationOverlay({ node, theme }: Pick<NodeContentRendererProps, 
     const startedAt = Math.min(...loadingCandidates.map((candidate) => candidate.startedAt || startTimeRef.current));
     const elapsedMs = Math.max(0, localNow - startedAt);
     const reportedProgress = loadingCandidates.reduce((progress, candidate) => Math.max(progress, candidate.progress || 0), 0);
-    const progress = Math.max(0, Math.min(100, Math.round(reportedProgress)));
+    const progress = generationProgress(reportedProgress, elapsedMs, node.type);
 
-    return (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl bg-black/55 px-5 text-center backdrop-blur-md" style={{ color: theme.node.text }}>
-            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: `${theme.node.text}4d`, borderTopColor: theme.node.text }} />
-            <span className="text-xs font-medium tracking-[0.18em]">{progress > 0 ? `生成中 ${progress}%` : "生成中"}</span>
-            <span className="rounded-full border px-2.5 py-1 text-xs" style={{ borderColor: `${theme.node.text}3d`, background: "rgba(0,0,0,.16)" }}>
-                {formatDuration(elapsedMs)}
-            </span>
-            {progress > 0 ? (
-                <div className="h-1.5 w-32 overflow-hidden rounded-full" style={{ background: `${theme.node.text}33` }}>
-                    <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: theme.node.text }} />
-                </div>
-            ) : null}
-        </div>
-    );
+    return <div className="absolute inset-0 z-20 rounded-3xl"><GenerationProgressWater progress={progress} elapsedMs={elapsedMs} theme={theme} /></div>;
 }
 
 function ImageInfoBar({ node }: { node: CanvasNodeData }) {

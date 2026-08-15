@@ -463,6 +463,16 @@
             transform: translate(var(--batch-from-x), var(--batch-from-y)) rotate(var(--batch-from-rotate)) scale(0.72);
         }
     }
+
+    @keyframes canvas-generation-wave {
+        from {
+            transform: translate3d(0, 0, 0);
+        }
+
+        to {
+            transform: translate3d(-33.333333%, 0, 0);
+        }
+    }
 }
 
 ::view-transition-old(root),

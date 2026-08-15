@@ -35,6 +35,7 @@ function videoReferenceAccept(kind: CanvasVideoReferenceKind) {
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
+    readOnly?: boolean;
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<boolean | void>;
@@ -54,7 +55,7 @@ type CanvasNodePromptPanelProps = {
     onPromptFocus?: () => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onVideoReferenceUpload, onVideoReferenceRemove, imageReferences = [], onImageReferenceRemove, textReferences = [], onTextReferenceRemove, onResourcePreview, canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, readOnly = false, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onVideoReferenceUpload, onVideoReferenceRemove, imageReferences = [], onImageReferenceRemove, textReferences = [], onTextReferenceRemove, onResourcePreview, canvasScale = 1, positionVersion, onImageSettingsOpenChange, onPromptFocus }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -78,6 +79,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     }, [node.id, sourcePrompt]);
 
     const updatePrompt = (value: string) => {
+        if (readOnly) return;
         setPrompt(value);
         onPromptChange(node.id, value);
     };
@@ -86,7 +88,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = async () => {
         const text = prompt.trim();
-        if (!canSubmit || isRunning || isImageGenerating) return;
+        if (readOnly || !canSubmit || isRunning || isImageGenerating) return;
         if ((await onGenerate(node.id, mode, text)) !== false) {
             if (!isPanorama) setPrompt((current) => (current === text ? "" : current));
         }
@@ -97,6 +99,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             data-canvas-no-zoom
             className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            aria-readonly={readOnly}
+            inert={readOnly}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}

@@ -12,6 +12,7 @@ import type { NodeGenerationInput } from "./canvas-node-generation";
 type CanvasConfigComposerProps = {
     value: string;
     inputs: NodeGenerationInput[];
+    readOnly?: boolean;
     onChange: (value: string) => void;
     onClose: () => void;
 };
@@ -26,7 +27,7 @@ type MentionState = {
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
-export function CanvasConfigComposer({ value, inputs, onChange, onClose }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ value, inputs, readOnly = false, onChange, onClose }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -58,6 +59,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     }, [inputs, referenceById, theme, tokens]);
 
     const syncFromEditor = () => {
+        if (readOnly) return;
         const editor = editorRef.current;
         if (!editor) return;
         const next = serializeEditor(editor);
@@ -66,6 +68,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     };
 
     const syncMention = () => {
+        if (readOnly) return;
         const text = textBeforeCaret();
         const match = /@([^\s@]*)$/.exec(text);
         if (!match || !inputs.length) {
@@ -91,6 +94,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     };
 
     const insertReference = (input: NodeGenerationInput) => {
+        if (readOnly) return;
         const editor = editorRef.current;
         if (!editor) return;
         removeActiveMention();
@@ -137,9 +141,10 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                 {!value.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接的图片或文本</div> : null}
                 <div
                     ref={editorRef}
-                    contentEditable
+                    contentEditable={!readOnly}
                     suppressContentEditableWarning
-                    className="thin-scrollbar h-64 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    aria-readonly={readOnly}
+                    className={`thin-scrollbar h-64 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none ${readOnly ? "cursor-default" : "cursor-text"}`}
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
