@@ -395,6 +395,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [agentConfig, setAgentConfig] = useState<CanvasAgentConfig | null>(null);
     const [initialAgentRequest, setInitialAgentRequest] = useState<{ prompt: CanvasPendingAgentRequest["prompt"]; references: CanvasAssistantReference[] } | null>(null);
     const [viewport, setViewport] = useState<ViewportTransform>({ x: 0, y: 0, k: 1 });
+    const [isViewportMoving, setIsViewportMoving] = useState(false);
     const [size, setSize] = useState({ width: 1200, height: 720 });
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -754,6 +755,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         committedViewportRef.current = next;
         setViewport(next);
         setContextMenu((value) => (value ? null : value));
+    }, []);
+
+    const handleViewportMovingChange = useCallback((isMoving: boolean) => {
+        setIsViewportMoving((current) => (current === isMoving ? current : isMoving));
     }, []);
 
     useLayoutEffect(() => {
@@ -4121,6 +4126,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     viewport={viewport}
                     backgroundMode={backgroundMode}
                     onViewportChange={handleViewportChange}
+                    onViewportMovingChange={handleViewportMovingChange}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
                     onContextMenu={openCanvasCreateMenu}
@@ -4146,6 +4152,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         to={to}
                                         active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
                                         flowing={selectedNodeIds.has(connection.fromNodeId) || selectedNodeIds.has(connection.toNodeId)}
+                                        animateFlow={!isViewportMoving && (selectedNodeIds.has(connection.fromNodeId) || selectedNodeIds.has(connection.toNodeId))}
+                                        suppressEffects={isViewportMoving}
                                         flowTargetNodeId={selectedFlowNodeId}
                                         onSelect={() => {
                                             setSelectedConnectionId(connection.id);

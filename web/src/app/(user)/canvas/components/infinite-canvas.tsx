@@ -15,11 +15,17 @@ function isCanvasControl(target: EventTarget | null) {
     return Boolean(target.closest(canvasControlSelector));
 }
 
+function isCanvasViewportTarget(target: EventTarget | null, container: HTMLDivElement) {
+    if (target instanceof Node && container.contains(target)) return true;
+    return target instanceof Element && Boolean(target.closest("[data-canvas-viewport-overlay],.canvas-viewport-overlay"));
+}
+
 type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     viewport: ViewportTransform;
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
+    onViewportMovingChange?: (isMoving: boolean) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent) => void;
@@ -27,7 +33,7 @@ type InfiniteCanvasProps = {
     children: React.ReactNode;
 };
 
-export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onViewportMovingChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -40,12 +46,15 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     const scaleRef = useRef(viewport.k);
     const viewportRef = useRef(viewport);
     const onViewportChangeRef = useRef(onViewportChange);
+    const onViewportMovingChangeRef = useRef(onViewportMovingChange);
     const onCanvasDeselectRef = useRef(onCanvasDeselect);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
     const wheelFrameRef = useRef<number | null>(null);
     const nextWheelViewportRef = useRef<ViewportTransform | null>(null);
     const gestureScaleRef = useRef(1);
+    const isViewportMovingRef = useRef(false);
+    const viewportMovementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
 
     useEffect(() => {
@@ -55,10 +64,25 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
 
     useEffect(() => {
         onViewportChangeRef.current = onViewportChange;
+        onViewportMovingChangeRef.current = onViewportMovingChange;
         onCanvasDeselectRef.current = onCanvasDeselect;
-    }, [onCanvasDeselect, onViewportChange]);
+    }, [onCanvasDeselect, onViewportChange, onViewportMovingChange]);
+
+    const markViewportMoving = useCallback(() => {
+        if (!isViewportMovingRef.current) {
+            isViewportMovingRef.current = true;
+            onViewportMovingChangeRef.current?.(true);
+        }
+        if (viewportMovementTimerRef.current) clearTimeout(viewportMovementTimerRef.current);
+        viewportMovementTimerRef.current = setTimeout(() => {
+            viewportMovementTimerRef.current = null;
+            isViewportMovingRef.current = false;
+            onViewportMovingChangeRef.current?.(false);
+        }, 120);
+    }, []);
 
     const scheduleViewportChange = useCallback((nextViewport: ViewportTransform) => {
+        markViewportMoving();
         scaleRef.current = nextViewport.k;
         viewportRef.current = nextViewport;
         nextWheelViewportRef.current = nextViewport;
@@ -67,7 +91,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             wheelFrameRef.current = null;
             if (nextWheelViewportRef.current) onViewportChangeRef.current(nextWheelViewportRef.current);
         });
-    }, []);
+    }, [markViewportMoving]);
 
     const zoomAtPoint = useCallback((factor: number, clientX: number, clientY: number) => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -92,6 +116,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         () => () => {
             if (frameRef.current) cancelAnimationFrame(frameRef.current);
             if (wheelFrameRef.current) cancelAnimationFrame(wheelFrameRef.current);
+            if (viewportMovementTimerRef.current) clearTimeout(viewportMovementTimerRef.current);
         },
         [],
     );
@@ -162,6 +187,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 y: panState.current.initialY + dy,
                 k: scaleRef.current,
             };
+            markViewportMoving();
             if (frameRef.current) return;
             frameRef.current = requestAnimationFrame(() => {
                 frameRef.current = null;
@@ -185,13 +211,14 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
         };
-    }, []);
+    }, [markViewportMoving]);
 
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
 
         const handleWheel = (event: WheelEvent) => {
+            if (!isCanvasViewportTarget(event.target, container)) return;
             if (isCanvasControl(event.target)) return;
             event.preventDefault();
             if (!event.ctrlKey && !event.metaKey) {
@@ -211,8 +238,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             const worldY = (mouseY - currentViewport.y) / currentViewport.k;
             scheduleViewportChange({ x: mouseX - worldX * newScale, y: mouseY - worldY * newScale, k: newScale });
         };
-        container.addEventListener("wheel", handleWheel, { passive: false, capture: true });
-        return () => container.removeEventListener("wheel", handleWheel, { capture: true });
+        window.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+        return () => window.removeEventListener("wheel", handleWheel, { capture: true });
     }, [containerRef, scheduleViewportChange]);
 
     useEffect(() => {

@@ -210,6 +210,7 @@ export function CanvasNodeHoverToolbar({
             <div
                 className="absolute z-[70]"
                 style={{ left, top }}
+                data-canvas-viewport-overlay
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
                     if (!imageToolSettingsOpen) onLeave();
@@ -316,7 +317,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff">
+        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" classNames={{ root: "canvas-viewport-overlay" }}>
             <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
                 <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-white/10 ${active ? "bg-white/10" : ""}`}>
                     {icon}

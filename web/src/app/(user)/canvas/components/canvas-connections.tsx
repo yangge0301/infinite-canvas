@@ -10,6 +10,8 @@ type ConnectionPathProps = {
     to: CanvasNodeData;
     active: boolean;
     flowing?: boolean;
+    animateFlow?: boolean;
+    suppressEffects?: boolean;
     flowTargetNodeId?: string;
     onSelect: () => void;
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
@@ -21,6 +23,8 @@ export const ConnectionPath = memo(function ConnectionPath({
     to,
     active,
     flowing = false,
+    animateFlow = flowing,
+    suppressEffects = false,
     flowTargetNodeId,
     onSelect,
     onContextMenu,
@@ -63,9 +67,9 @@ export const ConnectionPath = memo(function ConnectionPath({
                 strokeWidth={active ? 3 : 2}
                 strokeOpacity={active ? 1 : 0.82}
                 fill="none"
-                style={{ filter: active && !flowing ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
+                style={{ filter: active && !flowing && !suppressEffects ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
             />
-            {flowing ? (
+            {animateFlow ? (
                 <g aria-hidden opacity="0" style={{ pointerEvents: "none" }}>
                     <ellipse cx="0" cy="0" rx="32" ry="5" fill={theme.node.activeStroke} opacity="0.28" />
                     <ellipse cx="0" cy="0" rx="23" ry="2.3" fill={theme.node.activeStroke} />
@@ -75,7 +79,7 @@ export const ConnectionPath = memo(function ConnectionPath({
             ) : null}
         </g>
     );
-}, (previous, next) => previous.connection === next.connection && previous.from === next.from && previous.to === next.to && previous.active === next.active && previous.flowing === next.flowing && previous.flowTargetNodeId === next.flowTargetNodeId);
+}, (previous, next) => previous.connection === next.connection && previous.from === next.from && previous.to === next.to && previous.active === next.active && previous.flowing === next.flowing && previous.animateFlow === next.animateFlow && previous.suppressEffects === next.suppressEffects && previous.flowTargetNodeId === next.flowTargetNodeId);
 
 export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
