@@ -342,6 +342,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const draggedAssetPayloadRef = useRef<InsertAssetPayload | null>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
+    const clipboardPastePositionRef = useRef<Position | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -932,6 +933,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const videoCandidatePickerNode = videoCandidatePickerNodeId ? nodeById.get(videoCandidatePickerNodeId) || null : null;
     const openDirectorNode = openDirectorNodeId ? nodeById.get(openDirectorNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
+    const selectedFlowNodeId = selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : undefined;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
     const batchChildCountById = useMemo(() => {
         const map = new Map<string, number>();
@@ -1293,13 +1295,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             nodes: copiedNodes,
             connections: connectionsRef.current.filter((connection) => copiedIds.has(connection.fromNodeId) && copiedIds.has(connection.toNodeId)).map((connection) => ({ ...connection })),
         };
+        clipboardPastePositionRef.current = null;
     }, []);
 
     const pasteCopiedNodes = useCallback(() => {
         const clipboard = clipboardRef.current;
         if (!clipboard?.nodes.length) return false;
 
-        const center = getCanvasCenter();
         const bounds = clipboard.nodes.reduce(
             (acc, node) => ({
                 left: Math.min(acc.left, node.position.x),
@@ -1309,8 +1311,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }),
             { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
         );
-        const dx = center.x - (bounds.left + bounds.right) / 2;
-        const dy = center.y - (bounds.top + bounds.bottom) / 2;
+        const pastePosition = clipboardPastePositionRef.current;
+        const center = pastePosition ? null : getCanvasCenter();
+        const dx = pastePosition ? pastePosition.x - bounds.left : (center?.x || 0) - (bounds.left + bounds.right) / 2;
+        const dy = pastePosition ? pastePosition.y - bounds.top : (center?.y || 0) - (bounds.top + bounds.bottom) / 2;
         const idMap = new Map<string, string>();
         const nextNodes = clipboard.nodes.map((node, index) => {
             const id = `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1430,6 +1434,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const initialSelectedNodeIds = event.shiftKey ? Array.from(selectedNodeIdsRef.current) : [];
             deselectCanvas();
             const world = screenToCanvas(event.clientX, event.clientY);
+            if (clipboardRef.current) clipboardPastePositionRef.current = world;
             const nextSelectionBox = {
                 startWorldX: world.x,
                 startWorldY: world.y,
@@ -4118,7 +4123,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onViewportChange={handleViewportChange}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
-                    onCanvasDoubleClick={openCanvasCreateMenu}
                     onContextMenu={openCanvasCreateMenu}
                     onDrop={handleDrop}
                 >
@@ -4141,6 +4145,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         from={from}
                                         to={to}
                                         active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
+                                        flowing={selectedNodeIds.has(connection.fromNodeId) || selectedNodeIds.has(connection.toNodeId)}
+                                        flowTargetNodeId={selectedFlowNodeId}
                                         onSelect={() => {
                                             setSelectedConnectionId(connection.id);
                                             setSelectedNodeIds(new Set());
@@ -4240,6 +4246,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                     <CanvasConfigNodePanel
                                         node={contentNode}
                                         isRunning={runningNodeId === contentNode.id}
+                                        canvasScale={viewport.k}
+                                        positionVersion={`${viewport.x}:${viewport.y}:${viewport.k}`}
                                         inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
                                         videoFrameOptions={videoFrameOptionsByNodeId.get(contentNode.id) || []}
                                         videoResourceOptions={videoResourceOptionsByNodeId.get(contentNode.id) || []}

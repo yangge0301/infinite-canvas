@@ -27,9 +27,11 @@ type CanvasAudioSettingsPopoverProps = {
     onResourcePreview?: (nodeId: string) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
+    canvasScale?: number;
+    positionVersion?: string;
 };
 
-export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOptions = [], metadata, onMetadataChange, onResourcePreview, buttonClassName, placement = "topLeft" }: CanvasAudioSettingsPopoverProps) {
+export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOptions = [], metadata, onMetadataChange, onResourcePreview, buttonClassName, placement = "topLeft", canvasScale = 1, positionVersion }: CanvasAudioSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -57,11 +59,11 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
             window.removeEventListener("scroll", syncPosition, true);
             window.removeEventListener("pointerdown", closeOnOutsidePointer, true);
         };
-    }, [open]);
+    }, [canvasScale, open, positionVersion]);
 
     const audioOptions = useMemo(() => resourceOptions.filter((item) => item.kind === "audio"), [resourceOptions]);
     const cloneAudioNodeId = validCloneAudioNodeId(metadata?.mimoVoiceCloneAudioNodeId, audioOptions);
-    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} audioOptions={audioOptions} cloneAudioNodeId={cloneAudioNodeId} onMetadataChange={onMetadataChange} onResourcePreview={onResourcePreview} /> : null;
+    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} audioOptions={audioOptions} cloneAudioNodeId={cloneAudioNodeId} onMetadataChange={onMetadataChange} onResourcePreview={onResourcePreview} canvasScale={canvasScale} /> : null;
 
     return (
         <>
@@ -75,26 +77,32 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, resourceOpt
     );
 }
 
-function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, capability, onConfigChange, audioOptions, cloneAudioNodeId, onMetadataChange, onResourcePreview }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasAudioSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; capability: ReturnType<typeof modelCapabilityFor>; onConfigChange: CanvasAudioSettingsPopoverProps["onConfigChange"]; audioOptions: CanvasVideoResourceOption[]; cloneAudioNodeId: string; onMetadataChange?: CanvasAudioSettingsPopoverProps["onMetadataChange"]; onResourcePreview?: CanvasAudioSettingsPopoverProps["onResourcePreview"] }) {
+function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, capability, onConfigChange, audioOptions, cloneAudioNodeId, onMetadataChange, onResourcePreview, canvasScale }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasAudioSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; capability: ReturnType<typeof modelCapabilityFor>; onConfigChange: CanvasAudioSettingsPopoverProps["onConfigChange"]; audioOptions: CanvasVideoResourceOption[]; cloneAudioNodeId: string; onMetadataChange?: CanvasAudioSettingsPopoverProps["onMetadataChange"]; onResourcePreview?: CanvasAudioSettingsPopoverProps["onResourcePreview"]; canvasScale: number }) {
     const width = 356;
     const gap = 8;
     const margin = 12;
+    const scale = Math.max(0.35, Math.min(1.5, canvasScale));
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
-    const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - width / 2 : alignRight ? buttonRect.right - width : buttonRect.left;
+    const visualWidth = width * scale;
+    const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - visualWidth / 2 : alignRight ? buttonRect.right - visualWidth : buttonRect.left;
     const topPlacement = placement?.startsWith("top");
+    const availableHeight = topPlacement ? buttonRect.top - margin * 2 : window.innerHeight - buttonRect.bottom - margin * 2;
     const style = {
         position: "fixed",
         zIndex: 1200,
         width,
-        left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
-        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
+        left: Math.max(margin, Math.min(window.innerWidth - visualWidth - margin, left)),
+        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap * scale } : { top: buttonRect.bottom + gap * scale }),
+        maxHeight: Math.max(260, availableHeight / scale),
         background: theme.toolbar.panel,
         borderRadius: 18,
         boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",
         padding: 18,
         overflowY: "auto",
         color: theme.node.text,
+        transform: `scale(${scale})`,
+        transformOrigin: topPlacement ? "bottom left" : "top left",
     } as const;
     const model = config.model || config.audioModel || "";
 

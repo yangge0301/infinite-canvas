@@ -88,6 +88,16 @@ type NodeContentRendererProps = {
     onMoveStart?: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
+function sameReferenceList(left: CanvasResourceReference[], right: CanvasResourceReference[]) {
+    return left === right || (left.length === right.length && left.every((reference, index) => reference === right[index]));
+}
+
+function areCanvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
+    if (previous.data !== next.data || previous.scale !== next.scale || previous.isSelected !== next.isSelected || previous.isRelated !== next.isRelated || previous.isFocusRelated !== next.isFocusRelated || previous.isConnectionTarget !== next.isConnectionTarget || previous.isConnecting !== next.isConnecting || previous.editRequestNonce !== next.editRequestNonce || previous.showPanel !== next.showPanel || previous.showImageInfo !== next.showImageInfo || previous.resourceLabel !== next.resourceLabel || previous.now !== next.now || previous.batchCount !== next.batchCount || previous.groupChildCount !== next.groupChildCount || previous.isGroupDropTarget !== next.isGroupDropTarget || previous.batchExpanded !== next.batchExpanded || previous.batchClosing !== next.batchClosing || previous.batchOpening !== next.batchOpening || previous.batchRecovering !== next.batchRecovering || previous.batchMotion?.x !== next.batchMotion?.x || previous.batchMotion?.y !== next.batchMotion?.y || previous.batchMotion?.index !== next.batchMotion?.index) return false;
+    if (next.showPanel || next.data.type === CanvasNodeType.Config || next.data.type === CanvasNodeType.Director) return false;
+    return next.data.type !== CanvasNodeType.Text || sameReferenceList(previous.mentionReferences || [], next.mentionReferences || []);
+}
+
 export const CanvasNode = React.memo(function CanvasNode({
     data,
     scale,
@@ -184,14 +194,6 @@ export const CanvasNode = React.memo(function CanvasNode({
         window.addEventListener("pointerdown", handleOutsidePointerDown, true);
         return () => window.removeEventListener("pointerdown", handleOutsidePointerDown, true);
     }, [finishTitleEditing, isEditingTitle]);
-
-    useEffect(() => {
-        const textarea = textareaRef.current;
-        if (!textarea) return;
-        const handleWheel = (event: WheelEvent) => event.stopPropagation();
-        textarea.addEventListener("wheel", handleWheel, { passive: false });
-        return () => textarea.removeEventListener("wheel", handleWheel);
-    }, [data.type, isEditingContent]);
 
     useEffect(() => {
         if (!isEditingContent) return;
@@ -316,8 +318,6 @@ export const CanvasNode = React.memo(function CanvasNode({
         >
             <div
                 className="absolute left-3 top-[-28px] z-[65] max-w-[calc(100%-24px)]"
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
             >
                 {isEditingTitle ? (
                     <input
@@ -450,7 +450,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && !isGroup && renderPanel ? <div className={"absolute left-1/2 top-full z-[70] max-w-[calc(100vw-24px)] -translate-x-1/2 pt-4 " + (data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video ? "w-[580px]" : "w-[500px]")}>{renderPanel(data)}</div> : null}
         </div>
     );
-});
+}, areCanvasNodePropsEqual);
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Group) return null;
@@ -600,13 +600,11 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
-                    onWheel={(event) => event.stopPropagation()}
                 />
             ) : (
                 <div
                     className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
                     style={textStyle}
-                    onWheel={(event) => event.stopPropagation()}
                 >
                     {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
                 </div>

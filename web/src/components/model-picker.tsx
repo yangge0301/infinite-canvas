@@ -17,9 +17,10 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    popupScale?: number;
 };
 
-export function ModelPicker({ config, value, channelId, capability, onChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, channelId, capability, onChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, popupScale = 1 }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const autoCorrectedChannelRef = useRef("");
@@ -95,6 +96,7 @@ export function ModelPicker({ config, value, channelId, capability, onChange, cl
             <SelectContent
                 data-canvas-no-zoom
                 className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
+                style={popupScale === 1 ? undefined : { zoom: popupScale }}
                 position="popper"
                 align="start"
                 side="bottom"

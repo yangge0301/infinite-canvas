@@ -1,24 +1,30 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { memo, type MouseEvent as ReactMouseEvent } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "../types";
 
-export function ConnectionPath({
-    connection,
-    from,
-    to,
-    active,
-    onSelect,
-    onContextMenu,
-}: {
+type ConnectionPathProps = {
     connection: CanvasConnection;
     from: CanvasNodeData;
     to: CanvasNodeData;
     active: boolean;
+    flowing?: boolean;
+    flowTargetNodeId?: string;
     onSelect: () => void;
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
-}) {
+};
+
+export const ConnectionPath = memo(function ConnectionPath({
+    connection,
+    from,
+    to,
+    active,
+    flowing = false,
+    flowTargetNodeId,
+    onSelect,
+    onContextMenu,
+}: ConnectionPathProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const startX = from.position.x + from.width;
     const startY = from.position.y + from.height / 2;
@@ -27,6 +33,10 @@ export function ConnectionPath({
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
+    const flowPathD =
+        flowTargetNodeId === from.id
+            ? `M ${endX} ${endY} C ${endX - curvature} ${endY}, ${startX + curvature} ${startY}, ${startX} ${startY}`
+            : pathD;
 
     return (
         <g>
@@ -53,11 +63,19 @@ export function ConnectionPath({
                 strokeWidth={active ? 3 : 2}
                 strokeOpacity={active ? 1 : 0.82}
                 fill="none"
-                style={{ filter: active ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
+                style={{ filter: active && !flowing ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
             />
+            {flowing ? (
+                <g aria-hidden opacity="0" style={{ pointerEvents: "none" }}>
+                    <ellipse cx="0" cy="0" rx="32" ry="5" fill={theme.node.activeStroke} opacity="0.28" />
+                    <ellipse cx="0" cy="0" rx="23" ry="2.3" fill={theme.node.activeStroke} />
+                    <animateMotion path={flowPathD} dur="1.6s" repeatCount="indefinite" rotate="auto" calcMode="linear" keyPoints="0;0;1;1;1" keyTimes="0;0.12;0.73;0.8;1" />
+                    <animate attributeName="opacity" dur="1.6s" repeatCount="indefinite" values="0;0;0.95;0.95;0;0" keyTimes="0;0.12;0.17;0.73;0.8;1" />
+                </g>
+            ) : null}
         </g>
     );
-}
+}, (previous, next) => previous.connection === next.connection && previous.from === next.from && previous.to === next.to && previous.active === next.active && previous.flowing === next.flowing && previous.flowTargetNodeId === next.flowTargetNodeId);
 
 export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
