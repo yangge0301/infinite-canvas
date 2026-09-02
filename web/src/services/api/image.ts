@@ -5,7 +5,7 @@ import { uploadTemporaryReferenceFiles } from "@/services/api/reference-upload";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
-import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, geminiApiUrl, isArkChannelForConfig, isGeminiChannelForConfig, isOpenAIChannelForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, geminiApiUrl, isArkChannelForConfig, isGeminiChannelForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { persistGeneratedMediaResults } from "@/services/api/generated-media";
 import type { ReferenceImage } from "@/types/image";
@@ -1189,8 +1189,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         }
         if (params.size) formData.set("size", params.size);
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-        const urls = isOpenAIChannelForConfig(config) ? await uploadTemporaryReferenceFiles(files) : [];
-        (urls.length ? urls : files).forEach((image) => formData.append("image", image));
+        files.forEach((file) => formData.append("image", file));
         return { method: "POST", headers: tokenHeaders, body: formData };
     }
     if (isAgnesImageModel(config.model)) {

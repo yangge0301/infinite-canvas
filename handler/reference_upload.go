@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tigerowo/infinite-canvas/config"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/service"
 )
@@ -24,7 +25,11 @@ type referenceUploadFile struct {
 	Data []byte
 }
 
-const referenceUploadEndpoint = "https://video.kkone.vip/api/uploads"
+const (
+	referenceUploadEndpoint      = "https://video.kkone.vip/api/uploads"
+	referenceUploadMaxFiles      = 15
+	referenceUploadImageMaxBytes = 20 << 20
+)
 
 // uploadReferenceFile uploads a temporary reference file to the channel's
 // provider. The returned URL is intended for the immediate generation request.
@@ -40,6 +45,13 @@ func uploadReferenceFiles(channel model.ModelChannel, files []referenceUploadFil
 	if len(files) == 0 {
 		return []string{}, nil
 	}
+	if len(files) > referenceUploadMaxFiles {
+		return nil, fmt.Errorf("KK 素材上传一次最多支持 %d 个文件", referenceUploadMaxFiles)
+	}
+	token := strings.TrimSpace(config.Cfg.KKUploadToken)
+	if token == "" {
+		return nil, errors.New("未配置 KK 素材上传 Token")
+	}
 	uploadURL := referenceUploadEndpoint
 
 	var body bytes.Buffer
@@ -47,6 +59,9 @@ func uploadReferenceFiles(channel model.ModelChannel, files []referenceUploadFil
 	for _, file := range files {
 		if len(file.Data) == 0 {
 			return nil, errors.New("参考素材为空")
+		}
+		if strings.HasPrefix(strings.ToLower(file.Type), "image/") && len(file.Data) > referenceUploadImageMaxBytes {
+			return nil, errors.New("参考图片超过 KK 上传限制，请使用 20MB 以内的图片")
 		}
 		filename := referenceUploadFilename(file.Name, file.Type)
 		header := make(textproto.MIMEHeader)
@@ -69,6 +84,7 @@ func uploadReferenceFiles(channel model.ModelChannel, files []referenceUploadFil
 		return nil, err
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Authorization", "Bearer "+token)
 	response, err := service.HTTPClientForChannel(channel).Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("参考素材上传失败：%v", err)

@@ -448,12 +448,6 @@ export function isArkChannelForConfig(config: AiConfig) {
     return localChannelForActiveModel(config)?.protocol === "ark";
 }
 
-export function isOpenAIChannelForConfig(config: AiConfig) {
-    const channelId = channelIdForActiveModel(config);
-    if (config.channelMode === "remote") return (config.publicChannels.find((channel) => channel.id === channelId)?.protocol || "openai") === "openai";
-    return (localChannelForActiveModel(config)?.protocol || "openai") === "openai";
-}
-
 export function geminiApiUrl(baseUrl: string, model: string, action?: "generateContent" | "streamGenerateContent") {
     const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
     const apiBaseUrl = normalizedBaseUrl.toLowerCase().endsWith("/v1beta") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1beta`;
