@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Input, Modal, Slider } from "antd";
+import { Button, ColorPicker, Input, Modal, Slider } from "antd";
 import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -12,14 +12,15 @@ import type { AiConfig } from "@/stores/use-config-store";
 export type CanvasImageMaskEditPayload = {
     prompt: string;
     markedDataUrl: string;
+    brushColor: string;
     model: string;
     channelId?: string;
 };
 
 type DrawMode = "paint" | "erase";
 
-const defaultBrushSize = 100;
-const maskFillColor = "rgba(37, 99, 235, .38)";
+const defaultBrushSize = 2;
+const defaultBrushColor = "#2563eb";
 const maskBorderColor = "rgba(255, 255, 255, .72)";
 
 export function CanvasNodeMaskEditDialog({
@@ -49,6 +50,7 @@ export function CanvasNodeMaskEditDialog({
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [prompt, setPrompt] = useState("");
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
+    const [brushColor, setBrushColor] = useState(defaultBrushColor);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
@@ -57,6 +59,7 @@ export function CanvasNodeMaskEditDialog({
         if (!open) return;
         setPrompt("");
         setBrushSize(defaultBrushSize);
+        setBrushColor(defaultBrushColor);
         setMode("paint");
         setError("");
         setSubmitting(false);
@@ -67,6 +70,11 @@ export function CanvasNodeMaskEditDialog({
         clearCanvas(maskCanvasRef.current);
         clearCanvas(previewCanvasRef.current);
     }, [image]);
+
+    useEffect(() => {
+        const maskCanvas = maskCanvasRef.current;
+        if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor, canvasHasPaint(maskCanvas));
+    }, [brushColor]);
 
     const draw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
         const point = readCanvasPoint(event.currentTarget, event.clientX, event.clientY);
@@ -84,7 +92,7 @@ export function CanvasNodeMaskEditDialog({
         } else {
             drawMaskStroke(context, drawingRef.current.last, point, brushSize);
         }
-        renderMaskPreview(maskCanvas, previewCanvasRef.current);
+        renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor);
         drawingRef.current.last = point;
         if (mode === "paint") {
             setError("");
@@ -96,7 +104,7 @@ export function CanvasNodeMaskEditDialog({
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
         drawingRef.current = { active: true, last: null };
-        if (maskCanvasRef.current) renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current);
+        if (maskCanvasRef.current) renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current, brushColor);
         draw(event);
     };
 
@@ -109,7 +117,7 @@ export function CanvasNodeMaskEditDialog({
     const stopDraw = () => {
         drawingRef.current = { active: false, last: null };
         const maskCanvas = maskCanvasRef.current;
-        if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, canvasHasPaint(maskCanvas));
+        if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor, canvasHasPaint(maskCanvas));
     };
 
     const resetMask = () => {
@@ -126,7 +134,7 @@ export function CanvasNodeMaskEditDialog({
         if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
         setSubmitting(true);
         try {
-            onConfirm({ prompt: nextPrompt, markedDataUrl: await buildMarkedReference(dataUrl, canvas), model, channelId });
+            onConfirm({ prompt: nextPrompt, markedDataUrl: await buildMarkedReference(dataUrl, canvas, brushColor), brushColor, model, channelId });
         } catch {
             setSubmitting(false);
             setError("生成标记参考图失败");
@@ -177,7 +185,12 @@ export function CanvasNodeMaskEditDialog({
                             <span className="font-medium opacity-75">笔刷大小</span>
                             <span className="font-semibold">{brushSize}px</span>
                         </div>
-                        <Slider min={8} max={160} step={2} value={brushSize} onChange={setBrushSize} />
+                        <Slider min={2} max={160} step={1} value={brushSize} onChange={setBrushSize} />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium opacity-75">笔刷颜色</span>
+                        <ColorPicker value={brushColor} onChange={(_, hex) => setBrushColor(hex)} />
                     </div>
 
                     <div className="space-y-2">
@@ -256,11 +269,11 @@ function canvasHasPaint(canvas: HTMLCanvasElement) {
     return false;
 }
 
-function renderMaskPreview(maskCanvas: HTMLCanvasElement, previewCanvas: HTMLCanvasElement | null, withBorder = false) {
+function renderMaskPreview(maskCanvas: HTMLCanvasElement, previewCanvas: HTMLCanvasElement | null, brushColor: string, withBorder = false) {
     const context = previewCanvas?.getContext("2d");
     if (!previewCanvas || !context) return;
     context.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    context.fillStyle = maskFillColor;
+    context.fillStyle = withMaskAlpha(brushColor);
     context.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
     context.globalCompositeOperation = "destination-in";
     context.drawImage(maskCanvas, 0, 0);
@@ -297,7 +310,7 @@ function isMaskEdge(data: Uint8ClampedArray, width: number, x: number, y: number
     return data[((y - step) * width + x) * 4 + 3] === 0 || data[((y + step) * width + x) * 4 + 3] === 0 || data[(y * width + x - step) * 4 + 3] === 0 || data[(y * width + x + step) * 4 + 3] === 0;
 }
 
-async function buildMarkedReference(sourceDataUrl: string, selectionCanvas: HTMLCanvasElement) {
+async function buildMarkedReference(sourceDataUrl: string, selectionCanvas: HTMLCanvasElement, brushColor: string) {
     const canvas = document.createElement("canvas");
     canvas.width = selectionCanvas.width;
     canvas.height = selectionCanvas.height;
@@ -305,7 +318,7 @@ async function buildMarkedReference(sourceDataUrl: string, selectionCanvas: HTML
     if (!context) return selectionCanvas.toDataURL("image/png");
     const image = await loadCanvasImage(await toDrawableDataUrl(sourceDataUrl));
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    context.fillStyle = maskFillColor;
+    context.fillStyle = withMaskAlpha(brushColor);
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.globalCompositeOperation = "destination-in";
     context.drawImage(selectionCanvas, 0, 0);
@@ -313,6 +326,13 @@ async function buildMarkedReference(sourceDataUrl: string, selectionCanvas: HTML
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     context.globalCompositeOperation = "source-over";
     return canvas.toDataURL("image/png");
+}
+
+function withMaskAlpha(color: string) {
+    const hex = color.replace("#", "");
+    if (!/^[\da-f]{6}$/i.test(hex)) return color;
+    const value = Number.parseInt(hex, 16);
+    return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, .38)`;
 }
 
 async function toDrawableDataUrl(src: string) {
