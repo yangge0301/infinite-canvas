@@ -12,7 +12,6 @@ import type { AiConfig } from "@/stores/use-config-store";
 export type CanvasImageMaskEditPayload = {
     prompt: string;
     markedDataUrl: string;
-    brushColor: string;
     model: string;
     channelId?: string;
 };
@@ -45,6 +44,7 @@ export function CanvasNodeMaskEditDialog({
     onConfirm: (payload: CanvasImageMaskEditPayload) => void;
 }) {
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
+    const colorCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const drawingRef = useRef<{ active: boolean; start: { x: number; y: number } | null; last: { x: number; y: number } | null }>({ active: false, start: null, last: null });
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
@@ -68,40 +68,36 @@ export function CanvasNodeMaskEditDialog({
 
     useEffect(() => {
         clearCanvas(maskCanvasRef.current);
+        clearCanvas(colorCanvasRef.current);
         clearCanvas(previewCanvasRef.current);
     }, [image]);
-
-    useEffect(() => {
-        const maskCanvas = maskCanvasRef.current;
-        if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor, canvasHasPaint(maskCanvas));
-    }, [brushColor]);
 
     const draw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
         const point = readCanvasPoint(event.currentTarget, event.clientX, event.clientY);
         const maskCanvas = maskCanvasRef.current;
+        const colorCanvas = colorCanvasRef.current;
         const context = maskCanvas?.getContext("2d");
-        if (!maskCanvas || !context) return;
+        const colorContext = colorCanvas?.getContext("2d");
+        if (!maskCanvas || !colorCanvas || !context || !colorContext) return;
         if (mode === "frame") {
             const start = drawingRef.current.start;
             if (!start) return;
-            renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor);
+            renderMaskPreview(maskCanvas, colorCanvas, previewCanvasRef.current);
             drawFramePreview(previewCanvasRef.current, start, point, brushColor, brushSize);
             drawingRef.current.last = point;
             setError("");
             return;
         }
-        context.lineCap = "round";
-        context.lineJoin = "round";
-        context.lineWidth = brushSize;
-        context.globalCompositeOperation = mode === "paint" ? "source-over" : "destination-out";
-        context.strokeStyle = "#000";
-        context.fillStyle = "#000";
+        configureDrawContext(context, brushSize, mode, "#000");
+        configureDrawContext(colorContext, brushSize, mode, withMaskAlpha(brushColor));
         if (!drawingRef.current.last) {
             drawMaskStroke(context, point, point, brushSize);
+            drawMaskStroke(colorContext, point, point, brushSize);
         } else {
             drawMaskStroke(context, drawingRef.current.last, point, brushSize);
+            drawMaskStroke(colorContext, drawingRef.current.last, point, brushSize);
         }
-        renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor);
+        renderMaskPreview(maskCanvas, colorCanvas, previewCanvasRef.current);
         drawingRef.current.last = point;
         if (mode === "paint") {
             setError("");
@@ -113,7 +109,7 @@ export function CanvasNodeMaskEditDialog({
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
         drawingRef.current = { active: true, start: readCanvasPoint(event.currentTarget, event.clientX, event.clientY), last: null };
-        if (maskCanvasRef.current) renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current, brushColor);
+        if (maskCanvasRef.current && colorCanvasRef.current) renderMaskPreview(maskCanvasRef.current, colorCanvasRef.current, previewCanvasRef.current);
         draw(event);
     };
 
@@ -126,24 +122,26 @@ export function CanvasNodeMaskEditDialog({
     const stopDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
         if (!drawingRef.current.active) return;
         const maskCanvas = maskCanvasRef.current;
-        if (mode === "frame" && maskCanvas) {
+        const colorCanvas = colorCanvasRef.current;
+        if (mode === "frame" && maskCanvas && colorCanvas) {
             draw(event);
             const { start, last } = drawingRef.current;
             const context = maskCanvas.getContext("2d");
-            if (start && last && context) {
-                context.lineJoin = "round";
-                context.lineWidth = brushSize;
-                context.globalCompositeOperation = "source-over";
-                context.strokeStyle = "#000";
+            const colorContext = colorCanvas.getContext("2d");
+            if (start && last && context && colorContext) {
+                configureDrawContext(context, brushSize, "paint", "#000");
+                configureDrawContext(colorContext, brushSize, "paint", withMaskAlpha(brushColor));
                 drawMaskFrame(context, start, last);
+                drawMaskFrame(colorContext, start, last);
             }
         }
         drawingRef.current = { active: false, start: null, last: null };
-        if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor, canvasHasPaint(maskCanvas));
+        if (maskCanvas && colorCanvas) renderMaskPreview(maskCanvas, colorCanvas, previewCanvasRef.current, canvasHasPaint(maskCanvas));
     };
 
     const resetMask = () => {
         clearCanvas(maskCanvasRef.current);
+        clearCanvas(colorCanvasRef.current);
         clearCanvas(previewCanvasRef.current);
         setError("");
     };
@@ -151,12 +149,13 @@ export function CanvasNodeMaskEditDialog({
     const submit = async () => {
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
+        const colorCanvas = colorCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
-        if (!canvas) return;
+        if (!canvas || !colorCanvas) return;
         if (!canvasHasPaint(canvas)) return setError("请先标记局部区域");
         setSubmitting(true);
         try {
-            onConfirm({ prompt: nextPrompt, markedDataUrl: await buildMarkedReference(dataUrl, canvas, brushColor), brushColor, model, channelId });
+            onConfirm({ prompt: nextPrompt, markedDataUrl: await buildMarkedReference(dataUrl, colorCanvas), model, channelId });
         } catch {
             setSubmitting(false);
             setError("生成标记参考图失败");
@@ -172,6 +171,7 @@ export function CanvasNodeMaskEditDialog({
                         {image ? (
                             <>
                                 <canvas ref={maskCanvasRef} width={image.width} height={image.height} className="hidden" />
+                                <canvas ref={colorCanvasRef} width={image.width} height={image.height} className="hidden" />
                                 <canvas
                                     ref={previewCanvasRef}
                                     width={image.width}
@@ -284,6 +284,15 @@ function drawMaskStroke(context: CanvasRenderingContext2D, from: { x: number; y:
     context.stroke();
 }
 
+function configureDrawContext(context: CanvasRenderingContext2D, size: number, mode: Exclude<DrawMode, "frame">, color: string) {
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = size;
+    context.globalCompositeOperation = mode === "paint" ? "source-over" : "destination-out";
+    context.strokeStyle = color;
+    context.fillStyle = color;
+}
+
 function drawMaskFrame(context: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }) {
     context.beginPath();
     context.rect(Math.min(start.x, end.x), Math.min(start.y, end.y), Math.abs(end.x - start.x), Math.abs(end.y - start.y));
@@ -311,15 +320,11 @@ function canvasHasPaint(canvas: HTMLCanvasElement) {
     return false;
 }
 
-function renderMaskPreview(maskCanvas: HTMLCanvasElement, previewCanvas: HTMLCanvasElement | null, brushColor: string, withBorder = false) {
+function renderMaskPreview(maskCanvas: HTMLCanvasElement, colorCanvas: HTMLCanvasElement, previewCanvas: HTMLCanvasElement | null, withBorder = false) {
     const context = previewCanvas?.getContext("2d");
     if (!previewCanvas || !context) return;
     context.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    context.fillStyle = withMaskAlpha(brushColor);
-    context.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-    context.globalCompositeOperation = "destination-in";
-    context.drawImage(maskCanvas, 0, 0);
-    context.globalCompositeOperation = "source-over";
+    context.drawImage(colorCanvas, 0, 0);
     if (withBorder) drawDashedMaskBorder(context, maskCanvas);
 }
 
@@ -352,21 +357,15 @@ function isMaskEdge(data: Uint8ClampedArray, width: number, x: number, y: number
     return data[((y - step) * width + x) * 4 + 3] === 0 || data[((y + step) * width + x) * 4 + 3] === 0 || data[(y * width + x - step) * 4 + 3] === 0 || data[(y * width + x + step) * 4 + 3] === 0;
 }
 
-async function buildMarkedReference(sourceDataUrl: string, selectionCanvas: HTMLCanvasElement, brushColor: string) {
+async function buildMarkedReference(sourceDataUrl: string, colorCanvas: HTMLCanvasElement) {
     const canvas = document.createElement("canvas");
-    canvas.width = selectionCanvas.width;
-    canvas.height = selectionCanvas.height;
+    canvas.width = colorCanvas.width;
+    canvas.height = colorCanvas.height;
     const context = canvas.getContext("2d");
-    if (!context) return selectionCanvas.toDataURL("image/png");
+    if (!context) return colorCanvas.toDataURL("image/png");
     const image = await loadCanvasImage(await toDrawableDataUrl(sourceDataUrl));
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    context.fillStyle = withMaskAlpha(brushColor);
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.globalCompositeOperation = "destination-in";
-    context.drawImage(selectionCanvas, 0, 0);
-    context.globalCompositeOperation = "destination-over";
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    context.globalCompositeOperation = "source-over";
+    context.drawImage(colorCanvas, 0, 0);
     return canvas.toDataURL("image/png");
 }
 
