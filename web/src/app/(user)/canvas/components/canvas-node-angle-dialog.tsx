@@ -47,8 +47,8 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
                         </Button>
                     </div>
                     <div className="space-y-6 py-2">
-                        <AngleSlider label="左右角度" value={params.horizontalAngle} min={-60} max={60} step={1} suffix="deg" onChange={(value) => update("horizontalAngle", value)} />
-                        <AngleSlider label="俯仰角度" value={params.pitchAngle} min={-45} max={45} step={1} suffix="deg" onChange={(value) => update("pitchAngle", value)} />
+                        <AngleSlider label="左右角度" value={params.horizontalAngle} min={-90} max={90} step={1} suffix="deg" onChange={(value) => update("horizontalAngle", value)} />
+                        <AngleSlider label="俯仰角度" value={params.pitchAngle} min={-90} max={90} step={1} suffix="deg" onChange={(value) => update("pitchAngle", value)} />
                         <AngleSlider label="镜头距离" value={params.cameraDistance} min={1} max={10} step={0.1} onChange={(value) => update("cameraDistance", value)} />
                         <div className="grid grid-cols-[88px_1fr_72px] items-center gap-4">
                             <span className="font-medium opacity-75">广角镜头</span>
