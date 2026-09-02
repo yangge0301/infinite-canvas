@@ -18,7 +18,7 @@ export type CanvasImageMaskEditPayload = {
 
 type DrawMode = "paint" | "frame" | "erase";
 
-const defaultBrushSize = 2;
+const defaultBrushSize = 15;
 const defaultBrushColor = "#2563eb";
 const maskBorderColor = "rgba(255, 255, 255, .72)";
 
