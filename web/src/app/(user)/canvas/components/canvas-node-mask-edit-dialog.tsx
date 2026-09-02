@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, ColorPicker, Input, Modal, Slider } from "antd";
-import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
+import { Brush, Eraser, RotateCcw, Square, WandSparkles, X } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { readImageMeta } from "@/lib/image-utils";
@@ -17,7 +17,7 @@ export type CanvasImageMaskEditPayload = {
     channelId?: string;
 };
 
-type DrawMode = "paint" | "erase";
+type DrawMode = "paint" | "frame" | "erase";
 
 const defaultBrushSize = 2;
 const defaultBrushColor = "#2563eb";
@@ -46,7 +46,7 @@ export function CanvasNodeMaskEditDialog({
 }) {
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-    const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
+    const drawingRef = useRef<{ active: boolean; start: { x: number; y: number } | null; last: { x: number; y: number } | null }>({ active: false, start: null, last: null });
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [prompt, setPrompt] = useState("");
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
@@ -81,6 +81,15 @@ export function CanvasNodeMaskEditDialog({
         const maskCanvas = maskCanvasRef.current;
         const context = maskCanvas?.getContext("2d");
         if (!maskCanvas || !context) return;
+        if (mode === "frame") {
+            const start = drawingRef.current.start;
+            if (!start) return;
+            renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor);
+            drawFramePreview(previewCanvasRef.current, start, point, brushColor, brushSize);
+            drawingRef.current.last = point;
+            setError("");
+            return;
+        }
         context.lineCap = "round";
         context.lineJoin = "round";
         context.lineWidth = brushSize;
@@ -103,7 +112,7 @@ export function CanvasNodeMaskEditDialog({
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
-        drawingRef.current = { active: true, last: null };
+        drawingRef.current = { active: true, start: readCanvasPoint(event.currentTarget, event.clientX, event.clientY), last: null };
         if (maskCanvasRef.current) renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current, brushColor);
         draw(event);
     };
@@ -114,9 +123,22 @@ export function CanvasNodeMaskEditDialog({
         draw(event);
     };
 
-    const stopDraw = () => {
-        drawingRef.current = { active: false, last: null };
+    const stopDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+        if (!drawingRef.current.active) return;
         const maskCanvas = maskCanvasRef.current;
+        if (mode === "frame" && maskCanvas) {
+            draw(event);
+            const { start, last } = drawingRef.current;
+            const context = maskCanvas.getContext("2d");
+            if (start && last && context) {
+                context.lineJoin = "round";
+                context.lineWidth = brushSize;
+                context.globalCompositeOperation = "source-over";
+                context.strokeStyle = "#000";
+                drawMaskFrame(context, start, last);
+            }
+        }
+        drawingRef.current = { active: false, start: null, last: null };
         if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, brushColor, canvasHasPaint(maskCanvas));
     };
 
@@ -131,7 +153,7 @@ export function CanvasNodeMaskEditDialog({
         const canvas = maskCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
-        if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
+        if (!canvasHasPaint(canvas)) return setError("请先标记局部区域");
         setSubmitting(true);
         try {
             onConfirm({ prompt: nextPrompt, markedDataUrl: await buildMarkedReference(dataUrl, canvas, brushColor), brushColor, model, channelId });
@@ -171,9 +193,12 @@ export function CanvasNodeMaskEditDialog({
                         <div className="mt-2 text-sm opacity-60">{image ? `${image.width} x ${image.height}px` : "读取中"}</div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                         <Button type={mode === "paint" ? "primary" : "default"} icon={<Brush className="size-4" />} onClick={() => setMode("paint")}>
                             画笔
+                        </Button>
+                        <Button type={mode === "frame" ? "primary" : "default"} icon={<Square className="size-4" />} onClick={() => setMode("frame")}>
+                            画框
                         </Button>
                         <Button type={mode === "erase" ? "primary" : "default"} icon={<Eraser className="size-4" />} onClick={() => setMode("erase")}>
                             擦除
@@ -257,6 +282,23 @@ function drawMaskStroke(context: CanvasRenderingContext2D, from: { x: number; y:
     context.moveTo(from.x, from.y);
     context.lineTo(to.x, to.y);
     context.stroke();
+}
+
+function drawMaskFrame(context: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }) {
+    context.beginPath();
+    context.rect(Math.min(start.x, end.x), Math.min(start.y, end.y), Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+    context.stroke();
+}
+
+function drawFramePreview(canvas: HTMLCanvasElement | null, start: { x: number; y: number }, end: { x: number; y: number }, brushColor: string, brushSize: number) {
+    const context = canvas?.getContext("2d");
+    if (!context) return;
+    context.save();
+    context.lineJoin = "round";
+    context.lineWidth = brushSize;
+    context.strokeStyle = withMaskAlpha(brushColor);
+    drawMaskFrame(context, start, end);
+    context.restore();
 }
 
 function canvasHasPaint(canvas: HTMLCanvasElement) {

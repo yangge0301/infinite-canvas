@@ -23,6 +23,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 - [ ] 已有图片或视频内容的节点在设置面板切换比例时，节点展示外框立即切换至对应比例；后续再次生成和选择历史候选仍维持对应尺寸。
 - [ ] 图片节点的 AI 多角度弹窗中，左右角度、俯仰角度均可设置为 -90 至 90 度，并按所选方向传给生成提示词。
 - [ ] 图片局部编辑支持选择笔刷颜色；所选颜色用于遮罩预览、标记参考图与 AI 修改提示词，笔刷大小默认值为 2px。
+- [ ] 图片局部编辑的画笔旁新增“画框”模式；拖拽可绘制矩形边框，边框颜色与粗细沿用当前笔刷颜色和笔刷大小，AI 修改时以边框所圈范围为准。
 - [ ] 管理后台模型渠道可新增 Gemini 与火山方舟协议：Gemini 默认地址为 `https://generativelanguage.googleapis.com`，可拉取模型、测试模型；方舟默认地址为 `https://ark.cn-beijing.volces.com/api/v3`，标准 OpenAI 兼容渠道可拉取模型、测试模型。
 - [ ] Gemini 渠道配置为图片或文本模型后，图片工作台与画布图片节点可完成文生图、参考图生图；画布文本节点可返回文本。Gemini 图片的比例与清晰度配置会映射到 Gemini 支持的参数。
 - [ ] Gemini 图片请求将画布的像素尺寸映射为 `generationConfig.imageConfig.aspectRatio`，将质量映射为 `generationConfig.imageConfig.imageSize`；Nano Banana 2 的高质量设置应传为 `4K`。

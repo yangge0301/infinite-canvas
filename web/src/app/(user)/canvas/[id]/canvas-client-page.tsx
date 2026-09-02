@@ -2540,7 +2540,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 return;
             }
             const userPrompt = payload.prompt.trim();
-            const prompt = `参考图中以 ${payload.brushColor} 标记的半透明高亮覆盖区域是需要修改的位置，该颜色只是编辑标记，不要保留在最终图像中。只修改高亮区域，其他区域的构图、人物、文字、光影和风格保持不变。修改要求：${userPrompt}`;
+            const prompt = `参考图中以 ${payload.brushColor} 标记的局部区域是需要修改的位置；实色涂抹仅修改高亮部分，矩形边框则修改边框所圈范围。该颜色只是编辑标记，不要保留在最终图像中。其他区域的构图、人物、文字、光影和风格保持不变。修改要求：${userPrompt}`;
             const childId = nanoid();
             const clientTaskId = `client_image_task_${childId}`;
             const markedReference = { id: `${node.id}-marked`, name: `image-${node.id}-marked.png`, type: "image/png", dataUrl: payload.markedDataUrl };
