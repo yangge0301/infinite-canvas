@@ -2576,6 +2576,27 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [effectiveConfig, isAiConfigReady, message, openConfigDialog, projectId],
     );
 
+    const saveMaskEditImage = useCallback(async (node: CanvasNodeData, markedDataUrl: string) => {
+        const image = await uploadImage(markedDataUrl);
+        const childId = nanoid();
+        const child: CanvasNodeData = {
+            id: childId,
+            type: CanvasNodeType.Image,
+            title: "局部标记图片",
+            position: { x: node.position.x + node.width + 96, y: node.position.y },
+            width: node.width,
+            height: node.height,
+            metadata: { ...imageMetadata(image), prompt: node.metadata?.prompt },
+        };
+        setMaskEditNodeId(null);
+        setNodes((prev) => [...prev, child]);
+        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+        setSelectedNodeIds(new Set([childId]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(childId);
+        message.success("已保存为新图片节点");
+    }, [message]);
+
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
         if (!node.metadata?.content) return;
         setUpscaleNodeId(null);
@@ -4508,6 +4529,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             setMaskEditModel("");
                             setMaskEditChannelId("");
                         }}
+                        onSave={(markedDataUrl) => saveMaskEditImage(maskEditNode!, markedDataUrl)}
                         onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)}
                     />
                 ) : null}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, ColorPicker, Input, Modal, Slider } from "antd";
-import { Brush, Eraser, RotateCcw, Square, WandSparkles, X } from "lucide-react";
+import { Brush, Eraser, RotateCcw, Save, Square, WandSparkles, X } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { readImageMeta } from "@/lib/image-utils";
@@ -31,6 +31,7 @@ export function CanvasNodeMaskEditDialog({
     onModelChange,
     onMissingConfig,
     onClose,
+    onSave,
     onConfirm,
 }: {
     dataUrl: string;
@@ -41,6 +42,7 @@ export function CanvasNodeMaskEditDialog({
     onModelChange: (model: string, channelId?: string) => void;
     onMissingConfig: () => void;
     onClose: () => void;
+    onSave: (markedDataUrl: string) => Promise<void>;
     onConfirm: (payload: CanvasImageMaskEditPayload) => void;
 }) {
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -53,6 +55,7 @@ export function CanvasNodeMaskEditDialog({
     const [brushColor, setBrushColor] = useState(defaultBrushColor);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
+    const [saving, setSaving] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
@@ -62,6 +65,7 @@ export function CanvasNodeMaskEditDialog({
         setBrushColor(defaultBrushColor);
         setMode("paint");
         setError("");
+        setSaving(false);
         setSubmitting(false);
         void readImageMeta(dataUrl).then(setImage);
     }, [dataUrl, open]);
@@ -162,6 +166,20 @@ export function CanvasNodeMaskEditDialog({
         }
     };
 
+    const save = async () => {
+        const canvas = maskCanvasRef.current;
+        const colorCanvas = colorCanvasRef.current;
+        if (!canvas || !colorCanvas) return;
+        if (!canvasHasPaint(canvas)) return setError("请先标记局部区域");
+        setSaving(true);
+        try {
+            await onSave(await buildMarkedReference(dataUrl, colorCanvas));
+        } catch {
+            setSaving(false);
+            setError("保存标记图片失败");
+        }
+    };
+
     return (
         <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={980} centered destroyOnHidden>
             <div className="grid gap-5 lg:grid-cols-[minmax(360px,1fr)_320px]">
@@ -239,14 +257,17 @@ export function CanvasNodeMaskEditDialog({
                     </div>
 
                     <div className="mt-auto flex items-center justify-between gap-2">
-                        <Button icon={<RotateCcw className="size-4" />} onClick={resetMask} disabled={submitting}>
+                        <Button icon={<RotateCcw className="size-4" />} onClick={resetMask} disabled={submitting || saving}>
                             重置
                         </Button>
                         <div className="flex items-center gap-2">
-                            <Button icon={<X className="size-4" />} onClick={onClose} disabled={submitting}>
+                            <Button icon={<X className="size-4" />} onClick={onClose} disabled={submitting || saving}>
                                 取消
                             </Button>
-                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={submit} loading={submitting} disabled={submitting}>
+                            <Button icon={<Save className="size-4" />} onClick={save} loading={saving} disabled={submitting || saving}>
+                                保存图片
+                            </Button>
+                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={submit} loading={submitting} disabled={submitting || saving}>
                                 AI 修改
                             </Button>
                         </div>
