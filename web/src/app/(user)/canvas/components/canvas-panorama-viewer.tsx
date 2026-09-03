@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Maximize2, Move } from "lucide-react";
-import { SYSTEM, Viewer } from "@photo-sphere-viewer/core";
+import { Viewer } from "@photo-sphere-viewer/core";
 import "@photo-sphere-viewer/core/index.css";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -64,10 +64,31 @@ function releasePanoramaViewer(entry: PanoramaViewerEntry) {
     if (index >= 0) activePanoramaViewers.splice(index, 1);
 }
 
+function resolvePanoramaSrc(src: string) {
+    if (!src.startsWith("http://") && !src.startsWith("https://")) return src;
+
+    try {
+        const parsed = new URL(src, window.location.href);
+        if (
+            parsed.pathname.startsWith("/api/media/generated/") ||
+            parsed.pathname.startsWith("/api/files/") ||
+            parsed.origin === window.location.origin
+        ) {
+            return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        }
+    } catch {
+        return src;
+    }
+
+    return getProxyUrl(src);
+}
+
 function PanoramaSurface({ src, alt, proxyGeneratedPanorama, viewerEntry }: PanoramaSurfaceProps) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-    const panoramaSrc = proxyGeneratedPanorama ? getProxyUrl(src) : src;
+    const dragRef = useRef<{ pointerId: number; x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+    const [status, setStatus] = useState<"loading" | "fallback" | "ready" | "error">("loading");
+    const [fallbackOffset, setFallbackOffset] = useState({ x: 0, y: 0 });
+    const panoramaSrc = resolvePanoramaSrc(proxyGeneratedPanorama ? getProxyUrl(src) : src);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -76,22 +97,39 @@ function PanoramaSurface({ src, alt, proxyGeneratedPanorama, viewerEntry }: Pano
         if (!registerPanoramaViewer(viewerEntry)) return;
         setStatus("loading");
         let viewer: Viewer | null = null;
+        let disposed = false;
+        let loadTimeout: ReturnType<typeof setTimeout> | null = null;
+        const fallbackImage = new Image();
 
-        function handleReady() {
+        function handlePanoramaLoaded() {
+            if (disposed) return;
+            if (loadTimeout) clearTimeout(loadTimeout);
             setStatus("ready");
         }
 
-        function handleError() {
-            setStatus("error");
+        function handleViewerError(error?: unknown) {
+            if (disposed) return;
+            disposed = true;
+            if (loadTimeout) clearTimeout(loadTimeout);
+            console.error("全景图查看器加载失败", { src: panoramaSrc, error });
+            setStatus("fallback");
             destroyAndReleaseViewer();
+        }
+
+        function handleImageError(error?: unknown) {
+            if (disposed) return;
+            disposed = true;
+            console.error("全景图图片加载失败", { src: panoramaSrc, error });
+            setStatus("error");
+            releasePanoramaViewer(viewerEntry);
         }
 
         function destroyViewer() {
             const currentViewer = viewer;
             if (!currentViewer) return;
             viewer = null;
-            currentViewer.removeEventListener("ready", handleReady);
-            currentViewer.removeEventListener("panorama-error", handleError);
+            currentViewer.removeEventListener("panorama-loaded", handlePanoramaLoaded);
+            currentViewer.removeEventListener("panorama-error", handleViewerError);
             const contextLoss = currentViewer.container.querySelector<HTMLCanvasElement>(".psv-canvas")?.getContext("webgl2")?.getExtension("WEBGL_lose_context");
             try {
                 currentViewer.destroy();
@@ -108,40 +146,83 @@ function PanoramaSurface({ src, alt, proxyGeneratedPanorama, viewerEntry }: Pano
             }
         }
 
-        try {
-            SYSTEM.load();
-            viewer = new Viewer({
-                container,
-                panorama: panoramaSrc,
-                navbar: false,
-                mousewheel: false,
-                mousemove: true,
-                touchmoveTwoFingers: false,
-                moveInertia: false,
-                defaultZoomLvl: 50,
-                minFov: 25,
-                maxFov: 110,
-            });
-            viewer.addEventListener("ready", handleReady);
-            viewer.addEventListener("panorama-error", handleError);
-        } catch {
-            destroyAndReleaseViewer();
-            container.replaceChildren();
-            setStatus("error");
-            return;
+        function startViewer() {
+            if (disposed) return;
+            setStatus("fallback");
+            try {
+                viewer = new Viewer({
+                    container,
+                    navbar: false,
+                    mousewheel: false,
+                    mousemove: true,
+                    touchmoveTwoFingers: false,
+                    moveInertia: false,
+                    defaultZoomLvl: 50,
+                    minFov: 25,
+                    maxFov: 110,
+                });
+                viewer.addEventListener("panorama-loaded", handlePanoramaLoaded);
+                viewer.addEventListener("panorama-error", handleViewerError);
+                loadTimeout = setTimeout(() => handleViewerError(new Error("全景图查看器加载超时")), 15_000);
+                void viewer.setPanorama(panoramaSrc).then((loaded) => {
+                    if (loaded) handlePanoramaLoaded();
+                }).catch(handleViewerError);
+            } catch (error) {
+                console.error("全景图查看器初始化失败", { src: panoramaSrc, error });
+                handleViewerError(error);
+            }
         }
 
-        return destroyViewer;
+        fallbackImage.onload = startViewer;
+        fallbackImage.onerror = handleImageError;
+        fallbackImage.src = panoramaSrc;
+
+        return () => {
+            disposed = true;
+            if (loadTimeout) clearTimeout(loadTimeout);
+            fallbackImage.onload = null;
+            fallbackImage.onerror = null;
+            destroyViewer();
+        };
     }, [panoramaSrc, viewerEntry]);
+
+    const handleFallbackPointerDown = (event: ReactPointerEvent<HTMLImageElement>) => {
+        if (status === "ready" || status === "loading") return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, offsetX: fallbackOffset.x, offsetY: fallbackOffset.y };
+    };
+
+    const handleFallbackPointerMove = (event: ReactPointerEvent<HTMLImageElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        setFallbackOffset({ x: drag.offsetX + event.clientX - drag.x, y: drag.offsetY + event.clientY - drag.y });
+    };
+
+    const handleFallbackPointerUp = (event: ReactPointerEvent<HTMLImageElement>) => {
+        if (dragRef.current?.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+    };
 
     return (
         <div className="relative h-full w-full overflow-hidden">
-            {status === "error" ? (
-                <img src={src} alt={alt} draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain" />
+            {status !== "ready" && status !== "loading" ? (
+                <img
+                    src={panoramaSrc}
+                    alt={alt}
+                    draggable={false}
+                    onPointerDown={handleFallbackPointerDown}
+                    onPointerMove={handleFallbackPointerMove}
+                    onPointerUp={handleFallbackPointerUp}
+                    onPointerCancel={handleFallbackPointerUp}
+                    className="absolute inset-0 h-full w-full select-none object-contain"
+                    style={{ transform: `translate3d(${fallbackOffset.x}px, ${fallbackOffset.y}px, 0)`, cursor: status === "fallback" ? "grab" : "default" }}
+                />
             ) : null}
-            <div ref={containerRef} className="absolute inset-0 transition-opacity duration-200" style={{ opacity: status === "ready" ? 1 : 0 }} />
+            <div ref={containerRef} className="absolute inset-0 transition-opacity duration-200" style={{ opacity: status === "ready" ? 1 : 0, pointerEvents: status === "ready" ? "auto" : "none" }} />
             {status === "loading" ? <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20 text-xs text-white/80">正在加载全景图...</div> : null}
-            {status === "error" ? <div className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-white/80">全景图加载失败</div> : null}
+            {status === "error" ? <div className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-white/80">图片加载失败</div> : null}
         </div>
     );
 }
