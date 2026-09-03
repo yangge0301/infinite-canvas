@@ -153,6 +153,14 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			Fail(w, err.Error())
 			return
 		}
+		if isKKOpenAIImage2Channel(channel, modelName) {
+			body, contentType, err = normalizeKKOpenAIImage2Body(body, contentType)
+			if err != nil {
+				Fail(w, err.Error())
+				return
+			}
+			upstreamPath = "/images/generations"
+		}
 	}
 	if isGeminiChannel(channel) {
 		body, contentType, err = normalizeGeminiRequest(body, contentType, modelName, path)
