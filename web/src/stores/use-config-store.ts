@@ -448,6 +448,18 @@ export function isArkChannelForConfig(config: AiConfig) {
     return localChannelForActiveModel(config)?.protocol === "ark";
 }
 
+export function isKKOpenAIImage2ChannelForConfig(config: AiConfig) {
+    const model = config.model.trim().toLowerCase();
+    if (!model.includes("gpt-image-2")) return false;
+    const channels = config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config);
+    const activeId = channelIdForActiveModel(config);
+    const active = channels.find((channel) => channel.id === activeId);
+    const channel = active && (!active.models?.length || active.models.includes(config.model))
+        ? active
+        : channels.find((item) => item.models?.includes(config.model));
+    return channel?.protocol?.toLowerCase() === "openai" && channel.baseUrl?.toLowerCase().includes("api.kkone.vip");
+}
+
 export function geminiApiUrl(baseUrl: string, model: string, action?: "generateContent" | "streamGenerateContent") {
     const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
     const apiBaseUrl = normalizedBaseUrl.toLowerCase().endsWith("/v1beta") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1beta`;

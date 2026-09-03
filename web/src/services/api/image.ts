@@ -5,7 +5,7 @@ import { uploadTemporaryReferenceFiles } from "@/services/api/reference-upload";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
-import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, geminiApiUrl, isArkChannelForConfig, isGeminiChannelForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, channelIdForActiveModel, directAIProviderForConfig, geminiApiUrl, isArkChannelForConfig, isGeminiChannelForConfig, isKKOpenAIImage2ChannelForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { persistGeneratedMediaResults } from "@/services/api/generated-media";
 import type { ReferenceImage } from "@/types/image";
@@ -159,7 +159,7 @@ function resolveRequestSize(quality: string | undefined, size: string) {
 function createImageRequestParams(config: AiConfig): ImageRequestParams {
     const quality = normalizeQuality(config.quality);
     return {
-        n: normalizeBoundedInteger(config.count, 1, 1, 15),
+        n: normalizeBoundedInteger(config.count, 1, 1, isKKOpenAIImage2ChannelForConfig(config) ? 10 : 15),
         quality,
         size: resolveRequestSize(quality, config.size),
         timeoutSeconds: IMAGE_REQUEST_TIMEOUT_SECONDS,
@@ -740,7 +740,8 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
     };
     if (params.n > 1) body.n = params.n;
     applyImageGenerationParams(body, config, params);
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
+    if (isKKOpenAIImage2ChannelForConfig(config)) body.response_format = "url";
+    else if (config.responseFormatB64Json) body.response_format = "b64_json";
     if (config.streamImages) {
         body.stream = true;
         body.partial_images = params.streamPartialImages;
@@ -787,7 +788,8 @@ async function createGrokImageEditBody(config: AiConfig, prompt: string, referen
     };
     if (params.n > 1) body.n = params.n;
     applyImageGenerationParams(body, config, params, "edit");
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
+    if (isKKOpenAIImage2ChannelForConfig(config)) body.response_format = "url";
+    else if (config.responseFormatB64Json) body.response_format = "b64_json";
     if (config.streamImages) {
         body.stream = true;
         body.partial_images = params.streamPartialImages;
@@ -870,15 +872,16 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
     if (params.n > 1) formData.set("n", String(params.n));
     if (params.size) formData.set("size", params.size);
     if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-    if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
+    if (isKKOpenAIImage2ChannelForConfig(config)) formData.set("response_format", "url");
+    else if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
     if (config.streamImages) {
         formData.set("stream", "true");
         formData.set("partial_images", String(params.streamPartialImages));
     }
     const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     const directProvider = !usesAccountProxy(config) ? directAIProviderForConfig(config) : null;
-    const temporaryUrls = !usesAccountProxy(config) && !directProvider ? await uploadTemporaryReferenceFiles(files) : [];
-    (temporaryUrls.length ? temporaryUrls : files).forEach((file) => formData.append("image", file));
+    const temporaryUrls = !usesAccountProxy(config) && !directProvider && !isKKOpenAIImage2ChannelForConfig(config) ? await uploadTemporaryReferenceFiles(files) : [];
+    (temporaryUrls.length ? temporaryUrls : files).forEach((file, index) => formData.append(isKKOpenAIImage2ChannelForConfig(config) && files.length > 1 ? `image[${index}]` : "image", file));
 
     if (directProvider) {
         const { requestDirectImages } = await import("@/services/api/direct-ai");
@@ -1014,7 +1017,8 @@ async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?
         return references.length ? requestImageEditSingle(config, prompt, references, params) : requestImageGenerationSingle(config, prompt, params);
     }
     const inputImageDataUrls = references.length ? await Promise.all(references.map((image) => imageToDataUrl(image))) : [];
-    const useConcurrentSingleRequests = config.apiMode === "responses" || config.codexCli || config.streamImages;
+    const useResponsesApi = config.apiMode === "responses" && !isKKOpenAIImage2ChannelForConfig(config);
+    const useConcurrentSingleRequests = useResponsesApi || config.codexCli || config.streamImages;
     if (params.n > 1 && useConcurrentSingleRequests) {
         const results = await Promise.allSettled(Array.from({ length: params.n }, () => requestImages({ ...config, count: "1" }, prompt, references)));
         const images = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
@@ -1025,7 +1029,7 @@ async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?
     if (references.length && isAgnesImageModel(config.model)) {
         return requestAgnesImageEdit(config, prompt, references, params);
     }
-    if (config.apiMode === "responses") return requestResponsesSingle(config, prompt, inputImageDataUrls, params);
+    if (useResponsesApi) return requestResponsesSingle(config, prompt, inputImageDataUrls, params);
     return references.length ? requestImageEditSingle(config, prompt, references, params) : requestImageGenerationSingle(config, prompt, params);
 }
 
@@ -1146,7 +1150,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
             body: JSON.stringify({ endpoint: "/images/generations", ...meta, request: body }),
         };
     }
-    if (config.apiMode === "responses") {
+    if (config.apiMode === "responses" && !isKKOpenAIImage2ChannelForConfig(config)) {
         const inputImageDataUrls = references.length ? await Promise.all(references.map((image) => imageToDataUrl(image))) : [];
         const body: Record<string, unknown> = {
             model: config.model,
@@ -1182,14 +1186,15 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         formData.set("prompt", withPromptGuard(config, withSystemPrompt(config, prompt)));
         if (params.n > 1) formData.set("n", String(params.n));
         if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-        if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
+        if (isKKOpenAIImage2ChannelForConfig(config)) formData.set("response_format", "url");
+        else if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
         if (config.streamImages) {
             formData.set("stream", "true");
             formData.set("partial_images", String(params.streamPartialImages));
         }
         if (params.size) formData.set("size", params.size);
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-        files.forEach((file) => formData.append("image", file));
+        files.forEach((file, index) => formData.append(isKKOpenAIImage2ChannelForConfig(config) && files.length > 1 ? `image[${index}]` : "image", file));
         return { method: "POST", headers: tokenHeaders, body: formData };
     }
     if (isAgnesImageModel(config.model)) {
@@ -1209,7 +1214,8 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
     };
     applyImageGenerationParams(body, config, params);
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
+    if (isKKOpenAIImage2ChannelForConfig(config)) body.response_format = "url";
+    else if (config.responseFormatB64Json) body.response_format = "b64_json";
     if (config.streamImages) {
         body.stream = true;
         body.partial_images = params.streamPartialImages;

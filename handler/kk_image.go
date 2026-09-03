@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime"
 	"mime/multipart"
 	"strings"
@@ -26,28 +27,52 @@ func normalizeKKOpenAIImage2Body(body []byte, contentType string) ([]byte, strin
 	}
 	defer form.RemoveAll()
 
-	payload := map[string]any{}
-	inputURLs := []string{}
+	var result bytes.Buffer
+	writer := multipart.NewWriter(&result)
 	for key, values := range form.Value {
-		switch key {
-		case "image", "images", "image_url", "image_urls", "input_urls":
-			for _, value := range values {
-				if value = strings.TrimSpace(value); value != "" {
-					inputURLs = append(inputURLs, value)
-				}
-			}
-		default:
-			if len(values) == 1 {
-				payload[key] = values[0]
-			} else if len(values) > 1 {
-				payload[key] = values
+		if key == "response_format" {
+			continue
+		}
+		for _, value := range values {
+			if err := writer.WriteField(key, value); err != nil {
+				return body, contentType, err
 			}
 		}
 	}
-	if len(inputURLs) == 0 {
-		return body, contentType, errors.New("缺少图片参考地址")
+	if err := writer.WriteField("response_format", "url"); err != nil {
+		return body, contentType, err
 	}
-	payload["input_urls"] = inputURLs
+	for field, headers := range form.File {
+		for _, header := range headers {
+			file, err := header.Open()
+			if err != nil {
+				return body, contentType, err
+			}
+			part, err := writer.CreateFormFile(field, header.Filename)
+			if err == nil {
+				_, err = io.Copy(part, file)
+			}
+			_ = file.Close()
+			if err != nil {
+				return body, contentType, err
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return body, contentType, err
+	}
+	return result.Bytes(), writer.FormDataContentType(), nil
+}
+
+func normalizeKKOpenAIImage2GenerationBody(body []byte, contentType string) ([]byte, string, error) {
+	if !strings.HasPrefix(strings.ToLower(contentType), "application/json") {
+		return body, contentType, errors.New("KK gpt-image-2 文生图请求必须使用 JSON")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body, contentType, err
+	}
+	payload["response_format"] = "url"
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return body, contentType, err

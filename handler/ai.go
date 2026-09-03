@@ -146,20 +146,27 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
-	if path == "/images/edits" && !isGeminiChannel(channel) {
-		body, contentType, err = replaceReferenceFormFilesWithURLs(body, contentType, channel)
+	if path == "/images/generations" && isKKOpenAIImage2Channel(channel, modelName) {
+		body, contentType, err = normalizeKKOpenAIImage2GenerationBody(body, contentType)
 		if err != nil {
-			log.Printf("AI proxy upload image references failed: model=%s err=%v", modelName, err)
 			Fail(w, err.Error())
 			return
 		}
+	}
+	if path == "/images/edits" && !isGeminiChannel(channel) {
 		if isKKOpenAIImage2Channel(channel, modelName) {
 			body, contentType, err = normalizeKKOpenAIImage2Body(body, contentType)
 			if err != nil {
 				Fail(w, err.Error())
 				return
 			}
-			upstreamPath = "/images/generations"
+		} else {
+			body, contentType, err = replaceReferenceFormFilesWithURLs(body, contentType, channel)
+			if err != nil {
+				log.Printf("AI proxy upload image references failed: model=%s err=%v", modelName, err)
+				Fail(w, err.Error())
+				return
+			}
 		}
 	}
 	if isGeminiChannel(channel) {
