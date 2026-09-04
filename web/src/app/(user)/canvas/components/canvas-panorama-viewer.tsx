@@ -10,6 +10,13 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { getProxyUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { registerPanoramaCapture } from "../utils/canvas-panorama-capture";
+import type { PanoramaCaptureOptions } from "../utils/canvas-panorama-capture";
+
+export type PanoramaViewState = {
+    yaw: number;
+    pitch: number;
+    zoom: number;
+};
 
 type CanvasPanoramaViewerProps = {
     src: string;
@@ -20,6 +27,8 @@ type CanvasPanoramaViewerProps = {
     immersive?: boolean;
     onMoveStart?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
     onOpen?: () => void;
+    onViewChange?: (view: PanoramaViewState) => void;
+    viewRequest?: PanoramaViewState | null;
 };
 
 type PanoramaSurfaceProps = {
@@ -28,6 +37,8 @@ type PanoramaSurfaceProps = {
     captureId?: string;
     proxyGeneratedPanorama: boolean;
     viewerEntry: PanoramaViewerEntry;
+    onViewChange?: (view: PanoramaViewState) => void;
+    viewRequest?: PanoramaViewState | null;
 };
 
 const MAX_ACTIVE_PANORAMA_VIEWERS = 4;
@@ -86,21 +97,49 @@ function resolvePanoramaSrc(src: string) {
     return getProxyUrl(src);
 }
 
-function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEntry }: PanoramaSurfaceProps) {
+function cropAndScaleCanvas(source: HTMLCanvasElement, options?: PanoramaCaptureOptions) {
+    if (!source.width || !source.height) return null;
+    if (!options) return source.toDataURL("image/png");
+    const width = Math.max(1, Math.round(options.width));
+    const height = Math.max(1, Math.round(options.height));
+    const sourceRatio = source.width / Math.max(1, source.height);
+    const targetRatio = width / height;
+    let sx = 0;
+    let sy = 0;
+    let sw = source.width;
+    let sh = source.height;
+    if (sourceRatio > targetRatio) {
+        sw = Math.max(1, Math.round(source.height * targetRatio));
+        sx = Math.round((source.width - sw) / 2);
+    } else if (sourceRatio < targetRatio) {
+        sh = Math.max(1, Math.round(source.width / targetRatio));
+        sy = Math.round((source.height - sh) / 2);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
+    return canvas.toDataURL("image/png");
+}
+
+function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEntry, onViewChange, viewRequest }: PanoramaSurfaceProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const fallbackImageRef = useRef<HTMLImageElement>(null);
     const dragRef = useRef<{ pointerId: number; x: number; y: number; offsetX: number; offsetY: number } | null>(null);
     const [status, setStatus] = useState<"loading" | "fallback" | "ready" | "error">("loading");
     const [fallbackOffset, setFallbackOffset] = useState({ x: 0, y: 0 });
+    const viewerRef = useRef<Viewer | null>(null);
     const panoramaSrc = resolvePanoramaSrc(proxyGeneratedPanorama ? getProxyUrl(src) : src);
 
     useEffect(() => {
         if (!captureId) return;
-        return registerPanoramaCapture(captureId, () => {
+        return registerPanoramaCapture(captureId, (options) => {
             const viewerCanvas = containerRef.current?.querySelector<HTMLCanvasElement>(".psv-canvas");
             if (status === "ready" && viewerCanvas) {
                 try {
-                    return viewerCanvas.toDataURL("image/png");
+                    return cropAndScaleCanvas(viewerCanvas, options);
                 } catch (error) {
                     console.error("全景图镜头捕获失败", { error });
                 }
@@ -120,9 +159,16 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
             context.fillStyle = "#000";
             context.fillRect(0, 0, width, height);
             context.drawImage(image, (width - image.naturalWidth * scale) / 2 + fallbackOffset.x, (height - image.naturalHeight * scale) / 2 + fallbackOffset.y, image.naturalWidth * scale, image.naturalHeight * scale);
-            return canvas.toDataURL("image/png");
+            return cropAndScaleCanvas(canvas, options);
         });
     }, [captureId, fallbackOffset, status]);
+
+    useEffect(() => {
+        const viewer = viewerRef.current;
+        if (!viewer || status !== "ready" || !viewRequest) return;
+        viewer.rotate({ yaw: viewRequest.yaw, pitch: viewRequest.pitch });
+        viewer.zoom(viewRequest.zoom);
+    }, [status, viewRequest]);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -139,6 +185,16 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
             if (disposed) return;
             if (loadTimeout) clearTimeout(loadTimeout);
             setStatus("ready");
+            if (viewer) {
+                const position = viewer.getPosition();
+                onViewChange?.({ yaw: position.yaw, pitch: position.pitch, zoom: viewer.getZoomLevel() });
+            }
+        }
+
+        function handleViewerViewChange() {
+            if (!viewer) return;
+            const position = viewer.getPosition();
+            onViewChange?.({ yaw: position.yaw, pitch: position.pitch, zoom: viewer.getZoomLevel() });
         }
 
         function handleViewerError(error?: unknown) {
@@ -162,8 +218,11 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
             const currentViewer = viewer;
             if (!currentViewer) return;
             viewer = null;
+            viewerRef.current = null;
             currentViewer.removeEventListener("panorama-loaded", handlePanoramaLoaded);
             currentViewer.removeEventListener("panorama-error", handleViewerError);
+            currentViewer.removeEventListener("position-updated", handleViewerViewChange);
+            currentViewer.removeEventListener("zoom-updated", handleViewerViewChange);
             const contextLoss = currentViewer.container.querySelector<HTMLCanvasElement>(".psv-canvas")?.getContext("webgl2")?.getExtension("WEBGL_lose_context");
             try {
                 currentViewer.destroy();
@@ -196,8 +255,11 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
                     maxFov: 110,
                     rendererParameters: { alpha: true, antialias: true, preserveDrawingBuffer: true },
                 });
+                viewerRef.current = viewer;
                 viewer.addEventListener("panorama-loaded", handlePanoramaLoaded);
                 viewer.addEventListener("panorama-error", handleViewerError);
+                viewer.addEventListener("position-updated", handleViewerViewChange);
+                viewer.addEventListener("zoom-updated", handleViewerViewChange);
                 loadTimeout = setTimeout(() => handleViewerError(new Error("全景图查看器加载超时")), 15_000);
                 void viewer.setPanorama(panoramaSrc).then((loaded) => {
                     if (loaded) handlePanoramaLoaded();
@@ -219,7 +281,7 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
             fallbackImage.onerror = null;
             destroyViewer();
         };
-    }, [panoramaSrc, viewerEntry]);
+    }, [onViewChange, panoramaSrc, viewerEntry]);
 
     const handleFallbackPointerDown = (event: ReactPointerEvent<HTMLImageElement>) => {
         if (status === "ready" || status === "loading") return;
@@ -263,7 +325,7 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
     );
 }
 
-export default function CanvasPanoramaViewer({ src, alt, captureId, proxyGeneratedPanorama = false, expandOnDoubleClick = false, immersive = false, onMoveStart, onOpen }: CanvasPanoramaViewerProps) {
+export default function CanvasPanoramaViewer({ src, alt, captureId, proxyGeneratedPanorama = false, expandOnDoubleClick = false, immersive = false, onMoveStart, onOpen, onViewChange, viewRequest = null }: CanvasPanoramaViewerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const controlStyle = { background: theme.toolbar.panel, color: theme.toolbar.item };
     const [active, setActive] = useState<boolean | null>(null);
@@ -285,7 +347,7 @@ export default function CanvasPanoramaViewer({ src, alt, captureId, proxyGenerat
     };
     const surface =
         active === null ? null : active ? (
-            <PanoramaSurface key={surfaceKey} src={src} alt={alt} captureId={captureId} proxyGeneratedPanorama={proxyGeneratedPanorama} viewerEntry={viewerEntryRef.current} />
+            <PanoramaSurface key={surfaceKey} src={src} alt={alt} captureId={captureId} proxyGeneratedPanorama={proxyGeneratedPanorama} viewerEntry={viewerEntryRef.current} onViewChange={onViewChange} viewRequest={viewRequest} />
         ) : (
             <img src={src} alt={alt} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" />
         );

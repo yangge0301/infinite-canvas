@@ -1,4 +1,9 @@
-type PanoramaCaptureHandler = () => string | null;
+export type PanoramaCaptureOptions = {
+    width: number;
+    height: number;
+};
+
+type PanoramaCaptureHandler = (options?: PanoramaCaptureOptions) => string | null;
 
 const captureHandlers = new Map<string, PanoramaCaptureHandler>();
 
@@ -9,6 +14,6 @@ export function registerPanoramaCapture(nodeId: string, handler: PanoramaCapture
     };
 }
 
-export function capturePanorama(nodeId: string) {
-    return captureHandlers.get(nodeId)?.() || null;
+export function capturePanorama(nodeId: string, options?: PanoramaCaptureOptions) {
+    return captureHandlers.get(nodeId)?.(options) || null;
 }
