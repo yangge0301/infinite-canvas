@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
@@ -58,6 +58,7 @@ import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CANVAS_ASSET_DRAG_TYPE, CanvasSidePanel } from "../components/canvas-side-panel";
+import { capturePanorama } from "../utils/canvas-panorama-capture";
 import { DEFAULT_CANVAS_AGENT_PANEL, DEFAULT_CANVAS_SIDE_PANEL, useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { buildCanvasAgentContext } from "../agent/canvas-agent-context";
@@ -2275,6 +2276,46 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [message],
     );
 
+    const capturePanoramaFrame = useCallback(async (node: CanvasNodeData, capturedDataUrl?: string) => {
+        if (node.type !== CanvasNodeType.Panorama || !node.metadata?.content) return;
+        const dataUrl = capturedDataUrl || capturePanorama(node.id);
+        if (!dataUrl) {
+            message.warning("全景图镜头尚未准备好");
+            return;
+        }
+
+        const hideLoading = message.loading("正在捕获全景镜头...", 0);
+        try {
+            const image = await uploadImage(dataUrl, { localOnly: true });
+            let y = node.position.y;
+            for (const connection of connectionsRef.current) {
+                if (connection.fromNodeId !== node.id) continue;
+                const outputNode = nodesRef.current.find((item) => item.id === connection.toNodeId);
+                if (outputNode?.type === CanvasNodeType.Image) y = Math.max(y, outputNode.position.y + outputNode.height + 36);
+            }
+            const size = fitNodeSize(image.width, image.height);
+            const imageNode = {
+                id: nanoid(),
+                type: CanvasNodeType.Image,
+                title: `全景镜头-${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`,
+                position: { x: node.position.x + node.width + 96, y },
+                width: size.width,
+                height: size.height,
+                metadata: imageMetadata(image),
+            } satisfies CanvasNodeData;
+            setNodes((prev) => [...prev, imageNode]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: imageNode.id }]);
+            setSelectedNodeIds(new Set([imageNode.id]));
+            setSelectedConnectionId(null);
+            message.success("已捕获全景镜头并创建图片节点");
+        } catch (error) {
+            console.error("Capture panorama frame failed:", error);
+            message.error("全景镜头捕获失败");
+        } finally {
+            hideLoading();
+        }
+    }, [message]);
+
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((!isCanvasImageNodeType(node.type) && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
         saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
@@ -4416,6 +4457,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
+                    onCapturePanorama={(node) => void capturePanoramaFrame(node)}
                     onReversePrompt={createImageReversePromptNodes}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
@@ -4555,6 +4597,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         <FullscreenPreview
                             src={activeItemNode.metadata?.content || ""}
                             alt={activeItemNode.title || "图片"}
+                            captureId={activeItemNode.type === CanvasNodeType.Panorama ? `${activeItemNode.id}:preview` : undefined}
+                            onCapturePanorama={activeItemNode.type === CanvasNodeType.Panorama ? (dataUrl) => void capturePanoramaFrame(activeItemNode, dataUrl) : undefined}
                             isPanorama={activeItemNode.type === CanvasNodeType.Panorama}
                             proxyGeneratedPanorama={activeItemNode.type === CanvasNodeType.Panorama && Boolean(activeItemNode.metadata?.imageTaskId || activeItemNode.metadata?.imageTaskResultId) && !activeItemNode.metadata?.storageKey}
                             onClose={() => setPreviewNodeId(null)}
@@ -4620,7 +4664,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 }
 
-function FullscreenPreview({ src, alt, isPanorama, proxyGeneratedPanorama = false, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; alt: string; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+function FullscreenPreview({ src, alt, captureId, onCapturePanorama, isPanorama, proxyGeneratedPanorama = false, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; alt: string; captureId?: string; onCapturePanorama?: (dataUrl: string) => void; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
     const [zoom, setZoom] = useState<number>(1);
     const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -4668,6 +4712,29 @@ function FullscreenPreview({ src, alt, isPanorama, proxyGeneratedPanorama = fals
 
     return (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-sm" data-canvas-no-zoom={isPanorama ? "" : undefined} onClick={onClose}>
+            {isPanorama ? (
+                <div className="absolute right-5 top-5 z-[2020] flex items-center gap-2">
+                    {captureId ? (
+                        <button
+                            type="button"
+                            title="捕获镜头"
+                            aria-label="捕获镜头"
+                            className="flex size-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white backdrop-blur transition hover:bg-black/70"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                const dataUrl = capturePanorama(captureId);
+                                if (dataUrl) onCapturePanorama?.(dataUrl);
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                        >
+                            <Camera className="size-4" />
+                        </button>
+                    ) : null}
+                    <button type="button" title="关闭预览" aria-label="关闭预览" className="flex size-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white backdrop-blur transition hover:bg-black/70" onClick={(event) => { event.stopPropagation(); onClose(); }} onPointerDown={(event) => event.stopPropagation()}>
+                        <X className="size-4" />
+                    </button>
+                </div>
+            ) : null}
             {hasPrev || hasNext ? (
                 <>
                     <button
@@ -4692,7 +4759,7 @@ function FullscreenPreview({ src, alt, isPanorama, proxyGeneratedPanorama = fals
             ) : null}
             {isPanorama ? (
                 <div className="h-[85vh] w-[85vw] supports-[height:round(1px,1px)]:h-[round(85vh,1px)] supports-[height:round(1px,1px)]:w-[round(85vw,1px)] overflow-hidden rounded-2xl shadow-[0_24px_72px_rgba(0,0,0,0.4)]" onClick={(event) => event.stopPropagation()}>
-                    <CanvasPanoramaViewer src={src} alt={alt} proxyGeneratedPanorama={proxyGeneratedPanorama} immersive />
+                    <CanvasPanoramaViewer src={src} alt={alt} captureId={captureId} proxyGeneratedPanorama={proxyGeneratedPanorama} immersive />
                 </div>
             ) : (
                 <img
