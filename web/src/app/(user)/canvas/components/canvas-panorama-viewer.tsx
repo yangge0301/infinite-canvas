@@ -252,7 +252,7 @@ function PanoramaSurface({ src, alt, captureId, proxyGeneratedPanorama, viewerEn
                     moveInertia: false,
                     defaultZoomLvl: 50,
                     minFov: 25,
-                    maxFov: 110,
+                    maxFov: 120,
                     rendererParameters: { alpha: true, antialias: true, preserveDrawingBuffer: true },
                 });
                 viewerRef.current = viewer;

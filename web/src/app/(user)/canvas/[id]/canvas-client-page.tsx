@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
-import { Camera, ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Rotate3d, Settings2, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Globe2, Home, ImageIcon, Images, Layers3, List, Menu, Bot, Music2, PanelLeftClose, PanelLeftOpen, Plus, Redo2, Rotate3d, Settings2, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { deleteCanvasProjects, deleteCanvasTasks } from "@/services/api/canvas-tasks";
@@ -4798,6 +4798,13 @@ const PANORAMA_RESOLUTION_BASE: Record<PanoramaCaptureResolution, number> = { "1
 const PANORAMA_ASPECT_RATIO: Record<PanoramaCaptureAspect, number> = { "16:9": 16 / 9, "1:1": 1, "4:3": 4 / 3, "3:4": 3 / 4, "9:16": 9 / 16, "21:9": 21 / 9 };
 const DEFAULT_PANORAMA_CAMERA: PanoramaCameraState = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, fov: 75 };
 
+function panoramaAspectPreviewSize(aspect: PanoramaCaptureAspect) {
+    const ratio = PANORAMA_ASPECT_RATIO[aspect];
+    return ratio >= 1
+        ? { width: 34, height: Math.max(12, Math.round(34 / ratio)) }
+        : { width: Math.max(12, Math.round(34 * ratio)), height: 34 };
+}
+
 function panoramaCaptureSize(resolution: PanoramaCaptureResolution, aspect: PanoramaCaptureAspect): PanoramaCaptureOptions {
     const base = PANORAMA_RESOLUTION_BASE[resolution];
     const ratio = PANORAMA_ASPECT_RATIO[aspect];
@@ -4809,6 +4816,7 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
     const [mode, setMode] = useState<PanoramaPreviewMode>("simple");
     const [resolution, setResolution] = useState<PanoramaCaptureResolution>("2K");
     const [aspect, setAspect] = useState<PanoramaCaptureAspect>("16:9");
+    const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
     const [camera, setCamera] = useState<PanoramaCameraState>(DEFAULT_PANORAMA_CAMERA);
     const [viewRequest, setViewRequest] = useState<PanoramaViewState | null>(null);
     const captureSize = panoramaCaptureSize(resolution, aspect);
@@ -4822,14 +4830,14 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
     }, [onClose]);
 
     const handleViewChange = useCallback((view: PanoramaViewState) => {
-        setCamera((current) => ({ ...current, yaw: Number((view.yaw * 180 / Math.PI).toFixed(1)), pitch: Number((view.pitch * 180 / Math.PI).toFixed(1)), fov: Math.round(110 - view.zoom * 0.85) }));
+        setCamera((current) => ({ ...current, yaw: Number((view.yaw * 180 / Math.PI).toFixed(1)), pitch: Number((view.pitch * 180 / Math.PI).toFixed(1)), fov: Math.round(120 - view.zoom * 0.95) }));
     }, []);
 
     const handleCameraChange = (key: keyof PanoramaCameraState, value: number) => {
         const next = { ...camera, [key]: value };
         setCamera(next);
         if (key === "yaw" || key === "pitch" || key === "fov") {
-            setViewRequest({ yaw: next.yaw * Math.PI / 180, pitch: next.pitch * Math.PI / 180, zoom: Math.max(0, Math.min(100, (110 - next.fov) / 0.85)) });
+            setViewRequest({ yaw: next.yaw * Math.PI / 180, pitch: next.pitch * Math.PI / 180, zoom: Math.max(0, Math.min(100, (120 - next.fov) / 0.95)) });
         }
     };
 
@@ -4857,7 +4865,7 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
                     <div><div className="text-sm font-semibold tracking-wide">全景镜头</div><div className="mt-0.5 text-[11px] text-white/45">{captureSize.width} × {captureSize.height}</div></div>
                 </div>
                 <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg border border-white/10 bg-white/5 p-1">
-                    {(["simple", "professional"] as const).map((item) => <button key={item} type="button" className={`rounded-md px-4 py-1.5 text-xs transition ${mode === item ? "bg-white text-black" : "text-white/55 hover:text-white"}`} onClick={() => setMode(item)}>{item === "simple" ? "简单" : "专业"}</button>)}
+                    {(["simple", "professional"] as const).map((item) => <button key={item} type="button" className={`rounded-md px-4 py-1.5 text-xs transition ${mode === item ? "bg-white" : "text-white/55 hover:text-white"}`} style={mode === item ? { color: "#111827", background: "#ffffff" } : undefined} onClick={() => setMode(item)}>{item === "simple" ? "简单" : "专业"}</button>)}
                 </div>
                 <button type="button" title="关闭预览" aria-label="关闭预览" className="grid size-9 place-items-center rounded-lg text-white/60 transition hover:bg-white/10 hover:text-white" onClick={onClose}><X className="size-4" /></button>
             </header>
@@ -4872,8 +4880,19 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
                     <div className="flex min-h-14 shrink-0 flex-wrap items-center gap-3 border-b border-white/10 px-5 py-2.5">
                         <span className="mr-1 text-xs text-white/50">当前视图</span>
                         <label className="flex items-center gap-2 text-xs text-white/75">分辨率<select className={selectClass} value={resolution} onChange={(event) => setResolution(event.target.value as PanoramaCaptureResolution)}><option>1K</option><option>2K</option><option>4K</option></select></label>
-                        <label className="flex items-center gap-2 text-xs text-white/75">画面比例<select className={selectClass} value={aspect} onChange={(event) => setAspect(event.target.value as PanoramaCaptureAspect)}><option>16:9</option><option>1:1</option><option>4:3</option><option>3:4</option><option>9:16</option><option>21:9</option></select></label>
-                        <button type="button" className="ml-auto inline-flex h-8 items-center gap-2 rounded-md bg-white px-3 text-xs font-medium text-black transition hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40" disabled={!captureId} onClick={capture}><Camera className="size-3.5" />捕获镜头</button>
+                        <div className="relative flex items-center gap-2 text-xs text-white/75">
+                            <span>画面比例</span>
+                            <button type="button" aria-expanded={aspectMenuOpen} aria-haspopup="listbox" className={`${selectClass} inline-flex items-center justify-between gap-2 text-left`} style={{ background: "#15181d", borderColor: "rgba(255,255,255,0.16)", color: "#f8fafc" }} onClick={() => setAspectMenuOpen((open) => !open)}>
+                                <span className="flex items-center gap-2"><span className="inline-block border border-current" style={panoramaAspectPreviewSize(aspect)} />{aspect}</span><ChevronDown className={`size-3.5 transition-transform ${aspectMenuOpen ? "rotate-180" : ""}`} />
+                            </button>
+                            {aspectMenuOpen ? <div role="listbox" aria-label="画面比例" className="absolute left-[52px] top-full z-30 mt-2 w-36 overflow-hidden rounded-lg border border-white/15 bg-[#15181d] p-1 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+                                {(Object.keys(PANORAMA_ASPECT_RATIO) as PanoramaCaptureAspect[]).map((item) => {
+                                    const previewSize = panoramaAspectPreviewSize(item);
+                                    return <button key={item} type="button" role="option" aria-selected={aspect === item} className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-xs transition ${aspect === item ? "bg-white/12" : "hover:bg-white/8"}`} style={{ color: "#f8fafc" }} onClick={() => { setAspect(item); setAspectMenuOpen(false); }}><span className="flex h-9 w-9 items-center justify-center"><span className="inline-block border border-white/70" style={previewSize} /></span><span>{item}</span></button>;
+                                })}
+                            </div> : null}
+                        </div>
+                        <button type="button" className="ml-auto inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium transition hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "#ffffff", color: "#111827" }} disabled={!captureId} onClick={capture}><Camera className="size-3.5" />捕获镜头</button>
                     </div>
                     <div className="relative min-h-0 flex-1 bg-black/30 p-4">
                         <div className="h-full w-full overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl">
@@ -4883,12 +4902,12 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
                 </section>
 
                 {mode === "professional" ? <aside className="w-[292px] shrink-0 border-l border-white/10 bg-[#15181d] p-4" onClick={(event) => event.stopPropagation()}>
-                    <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Settings2 className="size-4 text-white/60" />相机</div><button type="button" className="text-[11px] text-white/45 transition hover:text-white" onClick={() => { setCamera(DEFAULT_PANORAMA_CAMERA); setViewRequest({ yaw: 0, pitch: 0, zoom: (110 - DEFAULT_PANORAMA_CAMERA.fov) / 0.85 }); }}>重置</button></div>
+                    <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Settings2 className="size-4 text-white/60" />相机</div><button type="button" className="text-[11px] text-white/45 transition hover:text-white" onClick={() => { setCamera(DEFAULT_PANORAMA_CAMERA); setViewRequest({ yaw: 0, pitch: 0, zoom: (120 - DEFAULT_PANORAMA_CAMERA.fov) / 0.95 }); }}>重置</button></div>
                     <div className="mb-5 grid grid-cols-3 gap-2">{cameraFields.slice(0, 3).map(({ key, label, suffix, min, max, step }) => <label key={key} className="text-[10px] text-white/45">{label}<div className="mt-1 flex items-center rounded-md border px-2" style={fieldStyle}><input type="number" value={camera[key]} min={min} max={max} step={step} onChange={(event) => handleCameraChange(key, Number(event.target.value))} className="h-8 min-w-0 w-full bg-transparent text-xs text-white outline-none" />{suffix ? <span className="text-[10px] text-white/35">{suffix}</span> : null}</div></label>)}</div>
                     <div className="mb-5"><div className="mb-2 text-[11px] font-medium text-white/65">旋转</div><div className="grid grid-cols-3 gap-2">{cameraFields.slice(3).map(({ key, label, suffix, min, max, step }) => <label key={key} className="text-[10px] text-white/45">{label}<div className="mt-1 flex items-center rounded-md border px-2" style={fieldStyle}><input type="number" value={camera[key]} min={min} max={max} step={step} onChange={(event) => handleCameraChange(key, Number(event.target.value))} className="h-8 min-w-0 w-full bg-transparent text-xs text-white outline-none" />{suffix ? <span className="text-[10px] text-white/35">{suffix}</span> : null}</div></label>)}</div></div>
-                    <div><div className="mb-2 flex items-center justify-between text-[11px] font-medium text-white/65"><span>FOV</span><span className="font-mono text-white/80">{Math.round(camera.fov)}°</span></div><input type="range" min={25} max={110} step={1} value={camera.fov} onChange={(event) => handleCameraChange("fov", Number(event.target.value))} className="w-full accent-white" /></div>
+                    <div><div className="mb-2 flex items-center justify-between text-[11px] font-medium text-white/65"><span>FOV</span><span className="font-mono text-white/80">{Math.round(camera.fov)}°</span></div><input type="range" min={25} max={120} step={1} value={camera.fov} onChange={(event) => handleCameraChange("fov", Number(event.target.value))} className="w-full accent-white" /></div>
                     <div className="mt-6 rounded-lg border border-white/10 p-3 text-[10px] leading-5 text-white/40">拖动画面可调整 Yaw / Pitch，捕获镜头会按顶部选定的分辨率和比例输出当前视图。</div>
-                    <button type="button" className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-white text-xs font-medium text-black transition hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40" disabled={!captureId} onClick={capture}><Camera className="size-3.5" />捕获镜头</button>
+                    <button type="button" className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-md text-xs font-medium transition hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "#ffffff", color: "#111827" }} disabled={!captureId} onClick={capture}><Camera className="size-3.5" />捕获镜头</button>
                 </aside> : null}
             </div>
         </div>
