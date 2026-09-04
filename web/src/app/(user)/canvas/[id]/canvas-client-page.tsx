@@ -4819,7 +4819,24 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
     const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
     const [camera, setCamera] = useState<PanoramaCameraState>(DEFAULT_PANORAMA_CAMERA);
     const [viewRequest, setViewRequest] = useState<PanoramaViewState | null>(null);
+    const previewViewportRef = useRef<HTMLDivElement>(null);
+    const [previewFrameSize, setPreviewFrameSize] = useState<{ width: number; height: number } | null>(null);
     const captureSize = panoramaCaptureSize(resolution, aspect);
+
+    useLayoutEffect(() => {
+        const viewport = previewViewportRef.current;
+        if (!viewport) return;
+        const updateFrameSize = () => {
+            const { width, height } = viewport.getBoundingClientRect();
+            const ratio = PANORAMA_ASPECT_RATIO[aspect];
+            const frameWidth = Math.min(width, height * ratio);
+            setPreviewFrameSize({ width: Math.max(1, Math.floor(frameWidth)), height: Math.max(1, Math.floor(frameWidth / ratio)) });
+        };
+        updateFrameSize();
+        const observer = new ResizeObserver(updateFrameSize);
+        observer.observe(viewport);
+        return () => observer.disconnect();
+    }, [aspect]);
 
     useEffect(() => {
         const closeOnEscape = (event: KeyboardEvent) => {
@@ -4895,8 +4912,10 @@ function PanoramaFullscreenPreview({ src, alt, captureId, proxyGeneratedPanorama
                         <button type="button" className="ml-auto inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs font-medium transition hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "#ffffff", color: "#111827" }} disabled={!captureId} onClick={capture}><Camera className="size-3.5" />捕获镜头</button>
                     </div>
                     <div className="relative min-h-0 flex-1 bg-black/30 p-4">
-                        <div className="h-full w-full overflow-hidden rounded-xl border border-white/10 bg-black shadow-2xl">
-                            <CanvasPanoramaViewer src={src} alt={alt} captureId={captureId} proxyGeneratedPanorama={proxyGeneratedPanorama} immersive onViewChange={handleViewChange} viewRequest={viewRequest} />
+                        <div ref={previewViewportRef} className="flex h-full w-full items-center justify-center overflow-hidden">
+                            <div className="overflow-hidden rounded-xl border border-white/25 bg-black shadow-2xl" style={previewFrameSize ? { width: previewFrameSize.width, height: previewFrameSize.height } : { width: "100%", aspectRatio: String(PANORAMA_ASPECT_RATIO[aspect]) }}>
+                                <CanvasPanoramaViewer src={src} alt={alt} captureId={captureId} proxyGeneratedPanorama={proxyGeneratedPanorama} immersive onViewChange={handleViewChange} viewRequest={viewRequest} />
+                            </div>
                         </div>
                     </div>
                 </section>
